@@ -77,13 +77,25 @@ Then provide 2-3 sentences summarizing the PR purpose, scope, and overall qualit
 
 Only report NEW critical issues that could cause crashes, security vulnerabilities, data loss, or major bugs.
 
-For each issue, use this exact format:
-```
-**[CRITICAL]** `File:Line` - Issue Title
-**Confidence:** High|Medium|Low (how sure you are this is a real problem)
-**Description:** Clear explanation of the issue
-**Impact:** What could go wrong if merged
-**Suggested Fix:** Specific code changes needed
+For each issue, write it as **plain markdown — do NOT wrap issues in a code
+fence.** Code fences (```) are reserved for actual code snippets only. If you
+fence the whole issue, the inline `**bold**` and backticks get swallowed and
+the section renders as one undifferentiated block. Use inline backticks for
+`File:Line` references; only fence the code snippet *inside* Suggested Fix.
+
+**Correctly-rendered example (follow this shape exactly):**
+
+**[CRITICAL]** `src/engine/Input.ts:176-180` — Scroll wheel hotbar cycling disabled in cursor-aiming fallback
+**Confidence:** High
+**Description:** `handleWheel()` returns early unless `this._locked` is true. In the cursor-aiming fallback the PR is trying to make fully playable, wheel events never reach the scroll handler, so hotbar cycling is broken.
+**Impact:** Hotbar cycling is broken for the exact fallback mode the PR is trying to make fully playable.
+**Suggested Fix:** Allow wheel events when no visible UI overlay has focus:
+
+```ts
+const t = e.target as Element | null;
+if (!t || t.closest?.(".closeable,.screen:not([hidden])")) return;
+e.preventDefault();
+this.onScroll?.(e.deltaY > 0 ? 1 : -1);
 ```
 
 ## ⚠️ High Priority Issues (Should Fix)
