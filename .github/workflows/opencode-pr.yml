@@ -1,9 +1,8 @@
 # AI pull-request review powered by opencode.
 #
 # On every (non-draft) PR — or via manual workflow_dispatch — this runs opencode
-# against the PR diff, posts a structured review, and publishes an `ai-merge-gate`
-# status that passes only when the review's machine-readable verdict is clean
-# (0 critical/high/medium issues and confidence ≥ 80). Auto-merges on green.
+# against the PR diff and posts a structured review comment. Review only: it does
+# not gate merges or publish status checks.
 #
 # Adapted from OpenStaticFish/ZigCraft. Differences for VOXL:
 #   • Nix → Bun (oven-sh/setup-bun + `bun install` for game + website)
@@ -11,7 +10,7 @@
 #   • runs on ubuntu-latest (swap to `blacksmith-2vcpu-ubuntu-2404` if enabled)
 #
 # Provider config: the opencode action needs a model + API key. This mirrors the
-# ZigCraft convention (KIMI_API_KEY + kimi-for-coding/k2p6). To use another
+# ZigCraft convention (KIMI_API_KEY + kimi-for-coding/k2.7). To use another
 # provider, change the `model:` and the API-key env var in the "Run opencode"
 # step, and add the matching repository secret.
 
@@ -43,11 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
-      id-token: write
       contents: write
       pull-requests: write
       issues: write
-      statuses: write
 
     steps:
       - name: Checkout repository
@@ -104,7 +101,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
         with:
-          model: kimi-for-coding/k2p6
+          model: kimi-for-coding/k2.7
           use_github_token: true
           prompt: ${{ env.PROMPT }}
 
@@ -126,16 +123,3 @@ jobs:
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 7
-
-      - name: Evaluate AI merge gate
-        id: ai_merge_gate
-        run: bash .github/scripts/publish_ai_merge_gate.sh
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-      - name: Mark AI review complete
-        if: always()
-        env:
-          AI_REVIEW_OUTCOME: ${{ steps.ai_review.outcome }}
-          GH_TOKEN: ${{ github.token }}
-        run: bash .github/scripts/mark_ai_review_complete.sh

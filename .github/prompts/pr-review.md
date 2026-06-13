@@ -139,28 +139,6 @@ Rate your confidence in this PR being ready to merge (0-100%).
 
 One-sentence explanation of the verdict.
 
-## Machine Readable Verdict
-
-Append this exact JSON block at the end of your review. Do not wrap it in another code block and do not add trailing commentary after it.
-
-```json
-{
-  "reviewed_sha": "$HEAD_SHA",
-  "critical_issues": 0,
-  "high_priority_issues": 0,
-  "medium_priority_issues": 0,
-  "overall_confidence_score": 0,
-  "recommendation": "MERGE"
-}
-```
-
-Rules for the JSON block:
-- `reviewed_sha` must match the PR head SHA above.
-- Counts must be integers.
-- `overall_confidence_score` must be an integer from 0 to 100.
-- If any critical, high, or medium issues remain, the counts must reflect them.
-- Use `MERGE` only when there are no unresolved critical, high, or medium issues and the score is at least 80.
-
 ---
 
 **Review Guidelines:**
