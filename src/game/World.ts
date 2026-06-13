@@ -239,6 +239,11 @@ export class World {
     return this.lightDebugMode;
   }
 
+  /** Number of chunks queued for re-lighting (debug overlay). */
+  get lightDirtyCount(): number {
+    return this.lightDirty.size;
+  }
+
   /** Highest non-air, non-water block at a column (for spawn placement). */
   groundHeight(wx: number, wz: number): number {
     const cx = Math.floor(wx / CHUNK_SIZE);
@@ -413,6 +418,8 @@ export class World {
   dispose(): void {
     for (const k of [...this.meshes.keys()]) this.disposeMeshes(k);
     this.chunks.clear();
+    this.lightDirty.clear();
+    this.lighting.dispose();
     this.terrainMaterial.dispose();
     this.waterMaterial.dispose();
     this.root.dispose();

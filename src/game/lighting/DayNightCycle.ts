@@ -88,6 +88,12 @@ export class DayNightCycle {
   private readonly ambient: HemisphericLight;
   private readonly hemi: HemisphericLight;
   private readonly scene: Scene;
+  // Scratch instances mutated every frame (avoids per-frame Color3/Color4
+  // allocations in the hot path).
+  private readonly _c1 = new Color3();
+  private readonly _c2 = new Color3();
+  private readonly _cFog = new Color3();
+  private readonly _clearColor = new Color4(0, 0, 0, 1);
 
   constructor(
     sun: DirectionalLight,
@@ -154,33 +160,32 @@ export class DayNightCycle {
     const sunAngle = (t - TIME_SUNRISE) * Math.PI * 2;
     const cosA = Math.cos(sunAngle);
     const sinA = Math.sin(sunAngle);
-    // Light travels from sun toward scene. Sun sits in +X at sunrise.
-    const dir = new Vector3(-cosA, -sinA, -0.35);
+    // Light travels from sun toward scene. Sun sits in +X at sunrise. Mutate the
+    // stable direction vectors in place (no per-frame allocation).
+    const dir = this.sunDirection.set(-cosA, -sinA, -0.35);
     dir.normalize();
-    this.sunDirection = dir;
-    this.moonDirection = dir.scale(-1); // moon is the antipode
-    this.sunSkyDirection = dir.scale(-1); // where the disc appears in the sky
-    this.moonSkyDirection = dir; // moon disc opposite the sun disc
+    dir.scaleToRef(-1, this.moonDirection); // moon is the antipode
+    dir.scaleToRef(-1, this.sunSkyDirection); // where the disc appears in the sky
+    this.moonSkyDirection.copyFrom(dir); // moon disc opposite the sun disc
 
     // --- Golden-hour warmth: peaks when the sun is near the horizon. ---
     this.goldenHour = 1 - Math.min(1, Math.abs(this.sunElevation) / 0.3);
 
     // --- Sky colours: day↔night base, then bleed dusk warmth at the horizon. ---
     const d = this.dayFactor;
-    const baseZen = Color3.Lerp(SKY.nightZenith, SKY.dayZenith, d);
-    const baseHor = Color3.Lerp(SKY.nightHorizon, SKY.dayHorizon, d);
     const g = this.goldenHour;
-    this.skyZenith = Color3.Lerp(baseZen, SKY.duskZenith, g * 0.4);
-    this.skyHorizon = Color3.Lerp(baseHor, SKY.duskHorizon, g * 0.75);
+    Color3.LerpToRef(SKY.nightZenith, SKY.dayZenith, d, this._c1);
+    Color3.LerpToRef(SKY.nightHorizon, SKY.dayHorizon, d, this._c2);
+    Color3.LerpToRef(this._c1, SKY.duskZenith, g * 0.4, this.skyZenith);
+    Color3.LerpToRef(this._c2, SKY.duskHorizon, g * 0.75, this.skyHorizon);
 
     // --- Sun/moon colours ---
-    this.sunColor = Color3.Lerp(SUN_COLOR_HIGH, SUN_COLOR_LOW, g);
-    this.moonColor = MOON_COLOR.clone();
+    Color3.LerpToRef(SUN_COLOR_HIGH, SUN_COLOR_LOW, g, this.sunColor);
 
     // --- Push into Babylon lights (used by the water pass + entities) ---
-    this.sun.direction = this.sunDirection;
+    this.sun.direction.copyFrom(this.sunDirection);
     this.sun.intensity = this.sunIntensityDay * d;
-    this.sun.diffuse = this.sunColor;
+    this.sun.diffuse.copyFrom(this.sunColor);
 
     // Ambient: small night floor + a touch of moonlight; never bright enough to
     // light caves (caves have no sun channel and the custom shader ignores this).
@@ -188,17 +193,18 @@ export class DayNightCycle {
       this.ambientIntensityNight +
       (this.ambientIntensityDay - this.ambientIntensityNight) * d +
       this.moonFactor * 0.4;
-    this.ambient.diffuse = Color3.White();
-    this.ambient.groundColor = Color3.White();
 
     this.hemi.intensity = 0.04 + this.hemiIntensityDay * d;
-    this.hemi.diffuse = Color3.Lerp(SKY.nightHorizon, SKY.dayHorizon, d);
-    this.hemi.groundColor = Color3.FromHexString("#4a6b3a");
+    Color3.LerpToRef(SKY.nightHorizon, SKY.dayHorizon, d, this._c1);
+    this.hemi.diffuse.copyFrom(this._c1);
 
-    // --- Sky clear + fog colour track the horizon ---
-    const sky = this.skyHorizon;
-    this.scene.clearColor = new Color4(sky.r, sky.g, sky.b, 1);
-    this.scene.fogColor = sky.clone();
+    // --- Sky clear + fog colour track the horizon (mutate stable instances) ---
+    this._clearColor.r = this.skyHorizon.r;
+    this._clearColor.g = this.skyHorizon.g;
+    this._clearColor.b = this.skyHorizon.b;
+    this._clearColor.a = 1;
+    this.scene.clearColor = this._clearColor;
+    this.scene.fogColor = this._cFog.copyFrom(this.skyHorizon);
   }
 
   /** Sun disc opacity (0 when below the horizon, fades in as it rises). */

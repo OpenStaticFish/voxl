@@ -37,8 +37,6 @@ export class LightMap {
   readonly block: Uint8Array;
   /** Lighting has been computed for the current terrain (not stale). */
   valid = false;
-  /** Lighting changed since the last mesh rebuild → remesh needed. */
-  dirty = false;
 
   constructor() {
     this.sun = new Uint8Array(CHUNK_VOLUME);
@@ -65,12 +63,6 @@ export class LightMap {
   clear(): void {
     this.sun.fill(0);
     this.block.fill(0);
-  }
-
-  /** Mark lighting freshly computed and the mesh as needing a rebuild. */
-  markValid(): void {
-    this.valid = true;
-    this.dirty = true;
   }
 }
 

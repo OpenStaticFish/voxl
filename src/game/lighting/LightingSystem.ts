@@ -152,15 +152,10 @@ export class LightingSystem {
       shadowsEnabled: this.shadows.enabled,
       paused: this.dayNight.paused,
       target: t,
-      dirtyCount: this.lightDirtyCount(),
+      dirtyCount: this.world.lightDirtyCount,
       litCount: lit,
       loadedCount: loaded,
     };
-  }
-
-  private lightDirtyCount(): number {
-    const w = this.world as unknown as { lightDirty?: { size: number } };
-    return w.lightDirty?.size ?? 0;
   }
 
   dispose(): void {

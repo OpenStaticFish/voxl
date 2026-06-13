@@ -70,10 +70,17 @@ export class SunLightPropagator {
             this.enqueue(idx);
             continue; // column stays open (sun passes straight through, e.g. glass)
           }
-          // First cell that breaks straight sunlight (opaque OR
-          // light-passing-but-not-sun-passing like leaves/water). Its surface
-          // is NOT seeded: it receives attenuated light from adjacent sky-lit
-          // air during BFS.
+          // First cell that breaks straight sunlight. If it still conducts light
+          // (water, leaves), seed its surface with one step of decay so a
+          // water/leaf column at the world top isn't pitch-black and so sky-lit
+          // colour bleeds into it; then close the column. Opaque blocks stay dark.
+          if (skyExposed && light.lightPassesThrough) {
+            const seed = LIGHT_MAX - 1 - light.lightAbsorption;
+            if (seed > 0 && seed > sun[idx]) {
+              sun[idx] = seed;
+              this.enqueue(idx);
+            }
+          }
           skyExposed = false;
         }
       }
@@ -154,9 +161,11 @@ export class SunLightPropagator {
   }
 
   /**
-   * Pull light INTO the in-chunk border cell `(lx,ly,lz)` from its out-of-chunk
-   * neighbour at world offset `(bx,bz)`. Uses the straight-down rule when the
-   * neighbour is directly above the cell (top edge) and is sky-lit.
+   * Pull light INTO the in-chunk border cell `(lx,ly,lz)` from its horizontal
+   * out-of-chunk neighbour at world offset `(bx,bz)`. This is what lets a cave
+   * in this chunk be lit by an opening in the adjacent chunk. Normal -1 decay.
+   * (Vertical/top-edge inflow is unnecessary: Phase A already seeds every
+   * sky-exposed column from the open world top.)
    */
   private pullInflow(
     access: LightAccess,
@@ -180,13 +189,10 @@ export class SunLightPropagator {
     if (nbLevel <= 1) return;
 
     const absorption = nbId === 0 ? 0 : resolveLight(getBlock(nbId)).lightAbsorption;
-    const sunPass = nbId === 0 ? true : resolveLight(getBlock(nbId)).sunlightPassesThrough;
-    // Neighbour is horizontal (bz/bx != 0) → normal decay into our cell.
     const candidate = nbLevel - 1 - absorption;
     if (candidate > sun[idx]) {
       sun[idx] = candidate;
       this.enqueue(idx);
     }
-    void sunPass;
   }
 }

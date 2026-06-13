@@ -57,6 +57,10 @@ export class CelestialSystem {
     this.sunDisc = this.makeDisc("sun", SUN_SIZE, this.sunMat);
     this.sunHalo = this.makeDisc("sun-halo", HALO_SIZE, this.haloMat);
     this.moonDisc = this.makeDisc("moon", MOON_SIZE, this.moonMat);
+    // Paint order within the transparent pass doesn't need forcing: the halo is
+    // additive (blending commutes) and all discs have depth-write off (no
+    // z-fighting). renderingGroupId is set once in makeDisc (group 0, same as
+    // terrain, so blocks occlude the discs).
   }
 
   private makeDisc(name: string, size: number, material: Material): Mesh {
@@ -69,6 +73,11 @@ export class CelestialSystem {
     m.applyFog = false; // sun/moon ignore fog so they stay crisp discs
     m.receiveShadows = false; // never receive or cast shadows
     m.alwaysSelectAsActiveMesh = true; // visible even though "far" away
+    // Same group as terrain (0): Babylon clears depth between groups, so a
+    // higher group would lose the terrain depth buffer and let the discs show
+    // through blocks. Within group 0 they render in the transparent pass after
+    // opaque terrain (depth-write off, depth-test on) → blocks occlude them.
+    m.renderingGroupId = 0;
     return m;
   }
 
@@ -110,17 +119,6 @@ export class CelestialSystem {
     this.sunMat.emissiveColor = warm;
     this.haloMat.emissiveColor = Color3.Lerp(Color3.White(), dn.sunColor, 0.5);
     this.moonMat.emissiveColor = dn.moonColor;
-
-    // Keep sun/moon/halo in the SAME rendering group as the terrain (0). Babylon
-    // clears depth between rendering groups, so a higher group would lose the
-    // terrain depth buffer and the sun would show through blocks. Here the discs
-    // render in the transparent pass after opaque terrain (depth-write off,
-    // depth-test on) → terrain in front occludes them, and they still draw over
-    // the depth-write-disabled sky dome. The halo must paint before the disc, so
-    // force it to render earlier via its render order (additive, no depth write).
-    this.sunHalo.renderingGroupId = 0;
-    this.sunDisc.renderingGroupId = 0;
-    this.moonDisc.renderingGroupId = 0;
   }
 
   dispose(): void {

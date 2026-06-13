@@ -99,6 +99,11 @@ export class VoxelLightEngine implements LightAccess {
     this.maps.delete(lightKey(cx, cz));
   }
 
+  /** Drop all light maps (call when the world is disposed). */
+  dispose(): void {
+    this.maps.clear();
+  }
+
   /**
    * Recompute sun + block light for `chunk` from scratch, using neighbour
    * chunks (where loaded) as boundary conditions. Returns whether anything
@@ -135,16 +140,14 @@ export class VoxelLightEngine implements LightAccess {
           }
         }
       }
-      if (changed && borderChanged) {
-        // Can't conclude more by scanning further; finish copy below.
-      }
+      // Both flags already set: no more information to gather — stop the scan.
+      if (changed && borderChanged) break;
     }
 
     // Commit scratch → stored map.
     oldSun.set(newSun);
     oldBlock.set(newBlock);
     map.valid = true;
-    if (changed) map.dirty = true;
 
     return { changed, borderChanged };
   }

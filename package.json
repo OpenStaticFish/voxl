@@ -14,6 +14,7 @@
     "site:preview": "cd website && bun run preview",
     "typecheck": "tsc --noEmit",
     "check": "bun run typecheck",
+    "test:light": "bun scripts/lighttest.ts",
     "screenshot": "bun scripts/screenshot.ts"
   },
   "dependencies": {
