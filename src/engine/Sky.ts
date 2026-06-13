@@ -85,6 +85,7 @@ export class Sky {
     this.dome.material = domeMat;
     this.dome.infiniteDistance = true; // follow the camera automatically
     this.dome.applyFog = false;
+    this.dome.receiveShadows = false; // sky never receives/casts shadows
     this.dome.parent = this.root;
     // Skybox-ish: render before everything else, ignore fog.
     this.dome.renderingGroupId = 0;
@@ -121,12 +122,14 @@ export class Sky {
     this.sunQuad.material = sunMat;
     this.sunQuad.billboardMode = Mesh.BILLBOARDMODE_ALL;
     this.sunQuad.applyFog = false;
+    this.sunQuad.receiveShadows = false; // sun billboard never receives/casts shadows
     this.sunQuad.alwaysSelectAsActiveMesh = true;
     this.sunQuad.parent = this.root;
 
     // --- Clouds (Minetest/Luanti-style voxel layer) ---
     this.clouds = new Clouds(seed, scene);
     this.clouds.mesh.parent = this.root;
+    this.clouds.mesh.receiveShadows = false; // clouds never receive/casts shadows
   }
 
   setCloudsEnabled(enabled: boolean): void {

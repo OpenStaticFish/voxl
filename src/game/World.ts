@@ -11,8 +11,16 @@ import {
 import { CHUNK_SIZE, CHUNK_HEIGHT, MAX_CHUNK_GEN_PER_FRAME, MAX_CHUNK_MESH_PER_FRAME } from "../constants";
 import type { BlockId } from "../types";
 import { Chunk } from "./Chunk";
-import { buildChunkGeometry } from "./ChunkMesher";
+import { buildChunkGeometry, type BrightnessSampler } from "./ChunkMesher";
 import { TerrainGenerator, findGroundY } from "./TerrainGenerator";
+import { VoxelLightEngine, lightKey } from "./lighting/VoxelLightEngine";
+import {
+  LIGHT_MAX,
+  MAX_CHUNK_LIGHT_PER_FRAME,
+  combineLight,
+  lightToBrightness,
+  type LightDebugMode,
+} from "./lighting/LightingConfig";
 
 function key(cx: number, cz: number): string {
   return `${cx},${cz}`;
@@ -42,6 +50,13 @@ export class World {
   private readonly chunks = new Map<string, Chunk>();
   private readonly meshes = new Map<string, ChunkMeshes>();
   private spiralCache = new Map<number, Array<{ dx: number; dz: number; d: number }>>();
+
+  /** Voxel light field (sun + block light per chunk). Drives mesh brightness. */
+  readonly lighting = new VoxelLightEngine((x, y, z) => this.getBlock(x, y, z));
+  /** Chunks whose lighting must be recomputed before they (re)mesh. */
+  private readonly lightDirty = new Set<string>();
+  /** Active light debug overlay (changes the mesh brightness sampler). */
+  private lightDebugMode: LightDebugMode = "off";
 
   constructor(seed: string, atlas: Texture, scene: Scene) {
     this.scene = scene;
@@ -127,13 +142,17 @@ export class World {
     const lz = wz - cz * CHUNK_SIZE;
     const changed = chunk.setLocal(lx, wy, lz, id);
     if (!changed) return false;
-    // Remesh this chunk, plus neighbors if the edit was on a border (their
-    // border faces may need to appear/disappear).
+    // Re-light the edited chunk (and queue neighbours — a changed cell can
+    // alter light several blocks away). Relighting marks the chunk dirty if any
+    // light value changed, which triggers a remesh below.
+    this.relightChunkNow(chunk, true);
+    // Remesh this chunk, plus neighbours if the edit was on a border (their
+    // border faces / lighting may need to update).
     chunk.dirty = true;
-    if (lx === 0) this.markDirty(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
-    if (lz === 0) this.markDirty(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+    if (lx === 0) this.queueNeighbourLight(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this.queueNeighbourLight(cx + 1, cz);
+    if (lz === 0) this.queueNeighbourLight(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this.queueNeighbourLight(cx, cz + 1);
     this.rebuildMesh(chunk);
     return true;
   }
@@ -141,6 +160,92 @@ export class World {
   private markDirty(cx: number, cz: number): void {
     const chunk = this.chunks.get(key(cx, cz));
     if (chunk && chunk.generated) chunk.dirty = true;
+  }
+
+  // --------------------------------------------------------- lighting ---
+
+  /**
+   * Per-vertex brightness sampler handed to the mesher. Combines the sun + block
+   * light of the sampled cell with the face's directional shade. In a debug
+   * overlay mode it returns a raw channel value (grayscale) instead.
+   *
+   * Sun light is baked at full day strength (sunFactor = 1); the day/night
+   * dimming is applied globally via Babylon light intensities so we never have
+   * to rebuild every mesh as the sun moves.
+   */
+  private readonly sampleBrightness: BrightnessSampler = (wx, wy, wz, shade) => {
+    const sun = this.lighting.getSun(wx, wy, wz);
+    const block = this.lighting.getBlockLight(wx, wy, wz);
+    switch (this.lightDebugMode) {
+      case "sun":
+        return sun / LIGHT_MAX;
+      case "block":
+        return block / LIGHT_MAX;
+      case "combined":
+        return combineLight(sun, block, 1) / LIGHT_MAX;
+      default:
+        return shade * lightToBrightness(combineLight(sun, block, 1));
+    }
+  };
+
+  /**
+   * Synchronously re-light `chunk` now. When `markNeighboursAlways` is set
+   * (chunk just generated) the 4 neighbours are queued for re-light so they
+   * pick up the new boundary light; otherwise neighbours are only queued when a
+   * border value actually changed.
+   */
+  private relightChunkNow(chunk: Chunk, markNeighboursAlways: boolean): void {
+    const result = this.lighting.relightChunk(chunk);
+    if (result.changed) chunk.dirty = true;
+    if (markNeighboursAlways || result.borderChanged) {
+      this.queueNeighbourLight(chunk.cx - 1, chunk.cz);
+      this.queueNeighbourLight(chunk.cx + 1, chunk.cz);
+      this.queueNeighbourLight(chunk.cx, chunk.cz - 1);
+      this.queueNeighbourLight(chunk.cx, chunk.cz + 1);
+    }
+  }
+
+  /** Queue a chunk (and mark it remesh-dirty) for re-lighting if generated. */
+  private queueNeighbourLight(cx: number, cz: number): void {
+    const chunk = this.chunks.get(key(cx, cz));
+    if (chunk && chunk.generated) this.lightDirty.add(key(cx, cz));
+  }
+
+  /**
+   * Drain the light-dirty queue with a per-frame budget. Each re-lit chunk may
+   * queue its neighbours (only when a border value changed), so light updates
+   * ripple outward and converge in a few frames rather than in one big stall.
+   */
+  private processLightDirty(budget: number): void {
+    if (this.lightDirty.size === 0) return;
+    let remaining = budget;
+    // Snapshot so we can safely add to the set while iterating.
+    const batch = [...this.lightDirty];
+    this.lightDirty.clear();
+    for (const k of batch) {
+      if (remaining <= 0) {
+        // Re-queue for next frame (keep closest-first ordering loosely).
+        this.lightDirty.add(k);
+        continue;
+      }
+      const chunk = this.chunks.get(k);
+      if (!chunk || !chunk.generated) continue;
+      this.relightChunkNow(chunk, false);
+      remaining--;
+    }
+  }
+
+  /** Switch the light debug overlay; rebuilds meshes so the change is visible. */
+  setLightDebugMode(mode: LightDebugMode): void {
+    if (this.lightDebugMode === mode) return;
+    this.lightDebugMode = mode;
+    for (const chunk of this.chunks.values()) {
+      if (chunk.generated) chunk.dirty = true;
+    }
+  }
+
+  getLightDebugMode(): LightDebugMode {
+    return this.lightDebugMode;
   }
 
   /** Highest non-air, non-water block at a column (for spawn placement). */
@@ -160,6 +265,8 @@ export class World {
     }
     if (!chunk.generated) {
       this.generator.generate(chunk);
+      // Light the new chunk immediately so spawn-area meshes are correct.
+      this.relightChunkNow(chunk, true);
       // Mark already-meshed neighbors dirty so shared borders remesh correctly.
       this.markDirty(cx - 1, cz);
       this.markDirty(cx + 1, cz);
@@ -191,6 +298,9 @@ export class World {
       }
       if (!chunk.generated) {
         this.generator.generate(chunk);
+        // Light the freshly generated chunk before it can be meshed, and queue
+        // neighbours so seams stay correct as chunks stream in.
+        this.relightChunkNow(chunk, true);
         this.markDirty(cx - 1, cz);
         this.markDirty(cx + 1, cz);
         this.markDirty(cx, cz - 1);
@@ -198,6 +308,10 @@ export class World {
         genBudget--;
       }
     }
+
+    // Propagate queued light updates (closest-first budget) BEFORE meshing so
+    // meshes always read fresh light values.
+    this.processLightDirty(MAX_CHUNK_LIGHT_PER_FRAME);
 
     // Mesh dirty chunks (closest first), respecting the budget.
     for (const off of order) {
@@ -220,12 +334,18 @@ export class World {
       if (ddx * ddx + ddz * ddz > unloadSq) {
         this.disposeMeshes(k);
         this.chunks.delete(k);
+        this.lighting.removeLight(chunk.cx, chunk.cz);
+        this.lightDirty.delete(k);
       }
     }
   }
 
   private rebuildMesh(chunk: Chunk): void {
-    const result = buildChunkGeometry(chunk, (x, y, z) => this.getBlock(x, y, z));
+    const result = buildChunkGeometry(
+      chunk,
+      (x, y, z) => this.getBlock(x, y, z),
+      this.sampleBrightness,
+    );
     const k = key(chunk.cx, chunk.cz);
     const existing = this.meshes.get(k);
 
@@ -261,8 +381,26 @@ export class World {
       mesh.material = material;
       mesh.parent = this.root;
       mesh.isPickable = false;
+      // Opaque/cutout terrain receives Babylon shadow mapping; water does not
+      // (it's alpha-blended + depth-write-disabled, shadows would look wrong).
+      mesh.receiveShadows = slot !== "transparent";
       vd.applyToMesh(mesh, false);
       entry[slot] = mesh;
+    }
+  }
+
+  /**
+   * Iterate every loaded chunk's opaque mesh + chunk coords. Used by the shadow
+   * manager to keep the shadow render list limited to nearby casters.
+   */
+  forEachOpaqueMesh(cb: (cx: number, cz: number, mesh: Mesh) => void): void {
+    for (const [k, entry] of this.meshes) {
+      const m = entry.opaque;
+      if (!m) continue;
+      const comma = k.indexOf(",");
+      const cx = parseInt(k.slice(0, comma), 10);
+      const cz = parseInt(k.slice(comma + 1), 10);
+      cb(cx, cz, m);
     }
   }
 

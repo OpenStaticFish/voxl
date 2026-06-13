@@ -395,6 +395,19 @@ export function createTextureAtlas(scene: Scene): AtlasResult {
       ctx.fillRect(ox + Math.floor(rand() * (TILE_PX - 2)), oy + Math.floor(rand() * (TILE_PX - 2)), 2, 2);
     }
   }
+  // 33: glowstone (warm, glowing emissive block for testing block light)
+  {
+    const [ox, oy] = off(33);
+    paintSpeckled(ctx, ox, oy, [244, 217, 122], 30, 120, rand);
+    ctx.fillStyle = "rgb(255,244,190)";
+    for (let i = 0; i < 8; i++) {
+      ctx.fillRect(ox + Math.floor(rand() * TILE_PX), oy + Math.floor(rand() * TILE_PX), 1, 1);
+    }
+    ctx.fillStyle = "rgb(180,150,60)";
+    for (let i = 0; i < 5; i++) {
+      ctx.fillRect(ox + Math.floor(rand() * TILE_PX), oy + Math.floor(rand() * TILE_PX), 1, 1);
+    }
+  }
 
   // Upload the painted canvas to the GPU.
   texture.update(false);

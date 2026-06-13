@@ -25,6 +25,7 @@ import { ScreenManager } from "../ui/ScreenManager";
 import { HUD } from "../ui/HUD";
 import { Menus } from "../ui/Menus";
 import { loadSettings, saveSettings } from "../state/Settings";
+import { LightingSystem } from "./lighting/LightingSystem";
 
 const SPAWN_PREGEN_RADIUS = 2;
 
@@ -43,6 +44,7 @@ export class Game {
   private readonly sky: Sky;
   private readonly atlas: DynamicTexture;
   private world: World | null = null;
+  private lighting: LightingSystem | null = null;
   private readonly player: Player;
   private readonly input: Input;
   private readonly screens: ScreenManager;
@@ -130,6 +132,7 @@ export class Game {
       if (code === "KeyP") void this.takeScreenshot();
       if (code === "KeyF") this.selectSlot(this.selectedIndex + 1);
       if (code === "Escape" && this.state === "playing") this.pause();
+      this.handleLightingDebugKey(code);
     };
   }
 
@@ -202,6 +205,10 @@ export class Game {
   }
 
   private createWorld(seed: string): void {
+    if (this.lighting) {
+      this.lighting.dispose();
+      this.lighting = null;
+    }
     if (this.world) {
       this.world.dispose();
       this.world = null;
@@ -209,6 +216,14 @@ export class Game {
     this.world = new World(seed, this.atlas, this.scene);
     // Re-seed the cloud field so it matches the new world.
     this.sky.setCloudSeed(seed);
+    // Wire the lighting system into the new world + the sky's Babylon lights.
+    this.lighting = new LightingSystem(
+      this.world,
+      this.sky.sun,
+      this.sky.ambient,
+      this.sky.hemi,
+      this.scene,
+    );
   }
 
   private setPlaying(): void {
@@ -270,6 +285,12 @@ export class Game {
       this.world?.update(this.player.position.x, this.player.position.z, this.settings.viewDistance);
     }
 
+    // Advance day/night + shadow follow even while paused (cheap, and lets you
+    // inspect frozen time). Skip when there's no world (main menu).
+    if (this.lighting && this.world) {
+      this.lighting.update(dt, this.player.position.x, this.player.position.y, this.player.position.z);
+    }
+
     this.sky.update(dt, this.player.camera.position);
     this.scene.render();
 
@@ -301,6 +322,15 @@ export class Game {
       const p = this.player.position;
       this.hud.setCoords(p.x, p.y, p.z);
       this.hud.setMode(this.player.flying ? "Flying" : this.player.inWater ? "Swimming" : "Walking");
+      // Lighting debug overlay (throttled). Uses the current block target so
+      // you can read the exact sun/block light of the block you're aiming at.
+      if (this.lighting) {
+        const target = this.player.getTarget();
+        const info = this.lighting.buildDebugInfo(
+          target ? { x: target.x, y: target.y, z: target.z, block: target.block } : null,
+        );
+        this.lighting.overlay.update(info);
+      }
     }
   }
 
@@ -351,6 +381,58 @@ export class Game {
     this.hud.setSelected(this.selectedIndex);
   }
 
+  // ------------------------------------------------------- lighting ---
+
+  /**
+   * Debug hotkeys for the lighting system. Active only while a world is loaded.
+   *   L            toggle the lighting debug overlay
+   *   K            cycle light visual mode (off → sun → block → combined)
+   *   T            freeze / unfreeze the day-night clock
+   *   H            toggle Babylon real-time shadows (voxel light stays on)
+   *   [  and  ]    scrub time backward / forward
+   *   ;  and  '    snap to midnight / midday
+   */
+  private handleLightingDebugKey(code: string): void {
+    if (!this.lighting) return;
+    const dn = this.lighting.dayNight;
+    switch (code) {
+      case "KeyL":
+        this.lighting.overlay.toggle();
+        break;
+      case "KeyK": {
+        const mode = this.lighting.cycleDebugMode();
+        this.hud.showToast(`Light view: ${mode}`);
+        break;
+      }
+      case "KeyT": {
+        dn.setPaused(!dn.paused);
+        this.hud.showToast(dn.paused ? "Time frozen" : "Time running");
+        break;
+      }
+      case "KeyH": {
+        const on = this.lighting.toggleShadows();
+        this.hud.showToast(on ? "Shadows: on" : "Shadows: off (voxel light only)");
+        break;
+      }
+      case "BracketLeft":
+        dn.setTime(dn.timeOfDay - 0.02);
+        break;
+      case "BracketRight":
+        dn.setTime(dn.timeOfDay + 0.02);
+        break;
+      case "Semicolon":
+        dn.setTimeMidnight();
+        this.hud.showToast("Time: midnight");
+        break;
+      case "Quote":
+        dn.setTimeMidday();
+        this.hud.showToast("Time: midday");
+        break;
+      default:
+        break;
+    }
+  }
+
   // --------------------------------------------------------- screens ---
 
   private updateFog(): void {
@@ -387,6 +469,7 @@ export class Game {
     this.running = false;
     window.removeEventListener("resize", this.handleResize);
     this.input.dispose();
+    this.lighting?.dispose();
     this.world?.dispose();
     this.sky.dispose();
     this.atlas.dispose();
@@ -420,6 +503,25 @@ export class Game {
     if (!this.world) return [];
     const chunks = (this.world as any).chunks as Map<string, unknown>;
     return [...chunks.keys()];
+  }
+
+  /**
+   * Lighting debug surface for the devtools console (`__voxl.lighting()`).
+   * Prints and returns a snapshot of the lighting system's state plus the block
+   * currently under the crosshair, and dumps the full shadow render list +
+   * frustum bounds (every caster mesh: name, position, bounds, visibility).
+   */
+  _lightingDebug(): unknown {
+    if (!this.lighting) return { error: "no world" };
+    const target = this.player.getTarget();
+    const info = this.lighting.buildDebugInfo(
+      target ? { x: target.x, y: target.y, z: target.z, block: target.block } : null,
+    );
+    // eslint-disable-next-line no-console
+    console.log("[lighting]", info);
+    // Dump the shadow render list + frustum for diagnosing shadow artifacts.
+    this.lighting.dumpShadowDiagnostics();
+    return info;
   }
 
   /** TEMP debug: replace all chunk materials with a flat unlit colour so the
@@ -466,5 +568,6 @@ function makeHighlight(scene: Scene): LinesMesh {
   lines.isPickable = false;
   lines.alwaysSelectAsActiveMesh = true;
   lines.applyFog = false;
+  lines.receiveShadows = false; // selection outline never receives/casts shadows
   return lines;
 }

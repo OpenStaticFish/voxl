@@ -4,6 +4,16 @@ import type { BlockId, FaceDef } from "../types";
 import { getBlock } from "./Blocks";
 import { tileUV } from "../engine/Textures";
 import type { Chunk } from "./Chunk";
+import { FACE_SHADE, PLANT_SHADE } from "./lighting/LightingConfig";
+
+/**
+ * Samples the final per-vertex brightness (0..1) for the cell a face looks into.
+ * The world/lighting system builds this callback; the mesher never hardcodes
+ * light behaviour — it only supplies the directional face shade. This lets the
+ * lighting system switch between normal rendering and debug overlays (raw sun /
+ * block light) without the mesher knowing.
+ */
+export type BrightnessSampler = (wx: number, wy: number, wz: number, shade: number) => number;
 
 // The six cube faces. Corner order + UVs are tuned so that triangles
 // (0,1,2, 2,1,3) produce correctly-wound front faces. Order matches the
@@ -103,9 +113,10 @@ const CORNER_UV: readonly (readonly [number, number])[] = [
   [1, 1],
 ];
 
-// Baked directional brightness per face to fake directional lighting. This is
-// robust (no mapping risk) and makes the world read clearly in screenshots.
-const FACE_BRIGHTNESS = [0.72, 0.72, 1.0, 0.5, 0.86, 0.86];
+// Baked directional brightness per face index (matches FACE order
+// [PX, NX, PY, NY, PZ, NZ]). Re-exported from LightingConfig so all light
+// tunables live in one place.
+const FACE_BRIGHTNESS = FACE_SHADE;
 
 /** Returns true if a face between `self` and `neighbor` should be rendered. */
 function shouldRenderFace(self: BlockId, neighbor: BlockId): boolean {
@@ -167,13 +178,12 @@ function pushFace(
 
 // Two diagonal quads forming an "X" — the classic plantlike cross used for
 // grass tufts, flowers and mushrooms. Rendered in the cutout pass.
-const CROSS_BRIGHTNESS = 0.92;
-function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: number): void {
+function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: number, brightness: number): void {
   const uv = tileUV(tile);
   const du = uv.u1 - uv.u0;
   const dv = uv.v1 - uv.v0;
   const base = b.vertexCount;
-  const br = CROSS_BRIGHTNESS;
+  const br = brightness;
   // Quad A: diagonal plane through (0,0,0)-(1,1,1). V is swapped vs. the
   // positions so that Y=0 (bottom) samples V=v1 (canvas-bottom of the tile
   // = the stem) and Y=1 (top) samples V=v0 (canvas-top = petals/leaves).
@@ -218,11 +228,14 @@ function toVertexData(b: BufferBuilder): VertexData | null {
 /**
  * Build opaque + transparent geometry for a chunk. `getBlockWorld` returns the
  * block id at world coordinates (0 = air for unloaded/out-of-range-above,
- * opaque for below the world floor).
+ * opaque for below the world floor). `sampleBrightness` returns the final
+ * vertex brightness (0..1) for the cell a face looks into, given the face's
+ * directional shade — it encodes voxel light + day/night + debug mode.
  */
 export function buildChunkGeometry(
   chunk: Chunk,
   getBlockWorld: (x: number, y: number, z: number) => BlockId,
+  sampleBrightness: BrightnessSampler,
 ): MeshResult {
   const opaque = newBuilder();
   const cutout = newBuilder();
@@ -240,8 +253,10 @@ export function buildChunkGeometry(
         const wy = y;
         const wz = oz + z;
         // Plantlike decorations render as an X-cross in the cutout pass.
+        // They read the light of their own cell.
         if (def.shape === "plantlike") {
-          pushCross(cutout, wx, wy, wz, def.tiles[2]);
+          const br = sampleBrightness(wx, wy, wz, PLANT_SHADE);
+          pushCross(cutout, wx, wy, wz, def.tiles[2], br);
           continue;
         }
         // Only water (liquids) uses the transparent pass/material. Leaves are
@@ -249,10 +264,16 @@ export function buildChunkGeometry(
         const builder = def.liquid ? transparent : opaque;
         for (let f = 0; f < 6; f++) {
           const n = FACES[f].neighbor;
-          const neighborId = getBlockWorld(wx + n[0], wy + n[1], wz + n[2]);
+          const nwx = wx + n[0];
+          const nwy = wy + n[1];
+          const nwz = wz + n[2];
+          const neighborId = getBlockWorld(nwx, nwy, nwz);
           if (!shouldRenderFace(id, neighborId)) continue;
+          // Face brightness comes from the light of the cell the face is
+          // exposed to (the neighbour air/space), combined with face shade.
+          const br = sampleBrightness(nwx, nwy, nwz, FACE_BRIGHTNESS[f]);
           const isWaterTop = def.liquid && n[1] === 1;
-          pushFace(builder, f, wx, wy, wz, def.tiles[f], FACE_BRIGHTNESS[f], isWaterTop);
+          pushFace(builder, f, wx, wy, wz, def.tiles[f], br, isWaterTop);
         }
       }
     }
