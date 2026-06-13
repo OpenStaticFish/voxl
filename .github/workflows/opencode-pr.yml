@@ -1,0 +1,125 @@
+# AI pull-request review powered by opencode.
+#
+# On every (non-draft) PR — or via manual workflow_dispatch — this runs opencode
+# against the PR diff and posts a structured review comment. Review only: it does
+# not gate merges or publish status checks.
+#
+# Adapted from OpenStaticFish/ZigCraft. Differences for VOXL:
+#   • Nix → Bun (oven-sh/setup-bun + `bun install` for game + website)
+#   • scripts/ → .github/scripts/ (keeps CI machinery out of the game's scripts/)
+#   • runs on ubuntu-latest (swap to `blacksmith-2vcpu-ubuntu-2404` if enabled)
+#
+# Provider config: the opencode action needs a model + API key. This mirrors the
+# ZigCraft convention (KIMI_API_KEY + kimi-for-coding/k2.7). To use another
+# provider, change the `model:` and the API-key env var in the "Run opencode"
+# step, and add the matching repository secret.
+
+name: opencode
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to review (manual trigger)'
+        required: true
+        type: number
+      head_sha:
+        description: 'Head SHA of the PR to review'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  opencode:
+    if: >
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.head_sha || github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Resolve PR context
+        id: resolve-pr
+        env:
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          INPUT_HEAD_SHA: ${{ inputs.head_sha }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash .github/scripts/resolve_pr_context.sh
+
+      - name: Configure git
+        run: bash .github/scripts/configure_git_identity.sh "github-actions[bot]" "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch previous opencode reviews
+        id: previous-reviews
+        run: bash .github/scripts/fetch_previous_opencode_reviews.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies (game + website)
+        run: |
+          bun install --frozen-lockfile
+          (cd website && bun install --frozen-lockfile)
+
+      - name: Prepare opencode cache
+        run: bash .github/scripts/prepare_opencode_cache.sh
+
+      - name: Configure opencode CI permissions
+        run: bash .github/scripts/configure_opencode_ci_permissions.sh
+
+      - name: Load review prompt
+        uses: ./.github/actions/load-prompt
+        with:
+          prompt-file: .github/prompts/pr-review.md
+          variables: $PR_NUMBER $HEAD_SHA $PREVIOUS_REVIEWS
+
+      - name: Run opencode
+        id: ai_review
+        timeout-minutes: 40
+        uses: anomalyco/opencode/github@latest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+        with:
+          model: kimi-for-coding/k2.7
+          use_github_token: true
+          prompt: ${{ env.PROMPT }}
+
+      - name: Dump opencode diagnostics
+        if: always()
+        env:
+          AI_REVIEW_OUTCOME: ${{ steps.ai_review.outcome }}
+        run: bash .github/scripts/dump_opencode_diagnostics.sh
+
+      - name: Upload opencode diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/opencode-cache
+            ~/.local/share/opencode
+            ~/.cache/opencode
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 7
