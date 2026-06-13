@@ -1,0 +1,350 @@
+/* =========================================================================
+   VOXL — marketing site global styles
+   Reuses the game's own visual identity (see ../../src/ui/ui.css):
+   deep space-navy backdrops, grass-green / teal / amber accents, blocky panels
+   with hard pixel shadows, monospace headings. Plus signature voxel motifs:
+   layered pixel-terrain dividers, drifting block clouds, voxel-grid backdrops.
+   ========================================================================= */
+
+:root {
+  /* surfaces */
+  --bg-0: #0b1020;
+  --bg-1: #131a32;
+  --bg-2: #1b2444;
+  --panel: rgba(16, 22, 42, 0.86);
+  --panel-solid: #10162a;
+  --panel-2: #161e3a;
+  --border: #2a355a;
+  --border-soft: #232c4d;
+
+  /* ink */
+  --ink: #e8edff;
+  --ink-dim: #9aa6cc;
+  --ink-mute: #6b78a0;
+
+  /* accents (from the game) */
+  --grass: #37c46a;
+  --grass-light: #46d97f;
+  --grass-dark: #2fae57;
+  --teal: #2dd4bf;
+  --amber: #f5a524;
+  --sky: #6f97ff;
+  --water: #366ec4;
+
+  /* block palette (from src/game/Blocks.ts) */
+  --blk-grass: #5fa84a;
+  --blk-dirt: #866040;
+  --blk-stone: #808084;
+  --blk-sand: #e0d096;
+  --blk-wood: #785634;
+  --blk-leaves: #366e2c;
+  --blk-water: #366ec4;
+  --blk-bedrock: #46464a;
+  --blk-snow: #eef2fa;
+  --blk-cactus: #4e8840;
+
+  --shadow-hard: 0 6px 0 0 rgba(0, 0, 0, 0.42);
+  --shadow-soft: 0 18px 40px rgba(0, 0, 0, 0.45);
+
+  --mono: "SFMono-Regular", ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+
+  --maxw: 1120px;
+  --radius: 14px;
+  --radius-sm: 9px;
+
+  --section-y: clamp(56px, 9vw, 104px);
+}
+
+/* ----------------------------- reset ----------------------------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 84px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: var(--teal);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: rgba(55, 196, 106, 0.35);
+  color: #fff;
+}
+
+/* ----------------------------- typography ----------------------------- */
+h1,
+h2,
+h3 {
+  font-family: var(--mono);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: 0.02em;
+  margin: 0 0 0.5em;
+}
+
+h1 {
+  font-size: clamp(2.6rem, 7vw, 4.6rem);
+  letter-spacing: 0.08em;
+}
+
+h2 {
+  font-size: clamp(1.7rem, 3.6vw, 2.5rem);
+  letter-spacing: 0.06em;
+}
+
+h3 {
+  font-size: 1.12rem;
+  letter-spacing: 0.04em;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--teal);
+  margin: 0 0 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5ch;
+}
+.eyebrow::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--grass);
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25);
+  display: inline-block;
+}
+
+.lede {
+  font-size: 1.16rem;
+  color: var(--ink-dim);
+  max-width: 60ch;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  padding: 0.1em 0.4em;
+  border-radius: 5px;
+  color: var(--ink);
+}
+
+/* ----------------------------- layout ----------------------------- */
+.wrap {
+  width: min(100% - 2.4rem, var(--maxw));
+  margin-inline: auto;
+}
+
+section {
+  position: relative;
+  padding-block: var(--section-y);
+}
+
+.section-head {
+  max-width: 64ch;
+  margin-bottom: clamp(28px, 4vw, 44px);
+}
+.section-head .lede {
+  margin-top: 0.6rem;
+}
+
+/* subtle voxel-grid backdrop, reused in a few sections */
+.grid-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(120, 160, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 160, 255, 0.045) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(75% 70% at 50% 35%, #000 35%, transparent 100%);
+  mask-image: radial-gradient(75% 70% at 50% 35%, #000 35%, transparent 100%);
+}
+
+/* ----------------------------- buttons ----------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5ch;
+  font-family: var(--mono);
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.8rem 1.25rem;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--border);
+  background: var(--bg-2);
+  color: var(--ink);
+  box-shadow: var(--shadow-hard);
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.09s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.btn:hover {
+  background: #232f5a;
+  border-color: var(--teal);
+  transform: translateY(-2px);
+  text-decoration: none;
+}
+.btn:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.42);
+}
+.btn--primary {
+  background: linear-gradient(180deg, var(--grass-light), var(--grass));
+  border-color: var(--grass-dark);
+  color: #06210f;
+}
+.btn--primary:hover {
+  background: linear-gradient(180deg, #5fe093, #3fd86c);
+  border-color: var(--teal);
+}
+.btn--ghost {
+  background: transparent;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+/* ----------------------------- cards (blocky) ----------------------------- */
+.card {
+  position: relative;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+/* grass-cap accent strip on top of feature cards */
+.card--accent::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--grass), var(--teal));
+}
+
+.card h3 {
+  margin-top: 0;
+}
+.card h3 .ic {
+  color: var(--teal);
+}
+
+/* ----------------------------- kbd ----------------------------- */
+kbd {
+  display: inline-block;
+  min-width: 28px;
+  padding: 3px 8px;
+  margin: 0 1px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-bottom-width: 3px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1;
+  color: var(--ink);
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* ----------------------------- badges / chips ----------------------------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4ch;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  background: rgba(8, 12, 28, 0.55);
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.6rem;
+  border-radius: 7px;
+}
+.chip b {
+  color: var(--grass);
+  font-weight: 700;
+}
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+/* ----------------------------- visually hidden (a11y) ----------------------------- */
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ----------------------------- reduced motion ----------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

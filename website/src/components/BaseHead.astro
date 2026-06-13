@@ -1,0 +1,39 @@
+---
+// <head> contents: charset, viewport, SEO, Open Graph, favicon, stylesheet.
+import { site } from "../data/site";
+import "../styles/global.css";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = `${site.name} — ${site.tagline}`,
+  description = site.description,
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url).toString();
+const ogImage = new URL("/voxl-og.svg", Astro.site ?? Astro.url).toString();
+---
+
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{title}</title>
+<meta name="description" content={description} />
+<link rel="canonical" href={canonical} />
+<meta name="theme-color" content="#0b1020" />
+<meta name="color-scheme" content="dark" />
+<meta name="generator" content={Astro.generator} />
+
+<!-- Open Graph -->
+<meta property="og:type" content="website" />
+<meta property="og:title" content={title} />
+<meta property="og:description" content={description} />
+<meta property="og:url" content={canonical} />
+<meta property="og:image" content={ogImage} />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+
+<!-- Fonts: system stacks only (matches the game, zero network weight). -->

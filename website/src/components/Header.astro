@@ -1,0 +1,199 @@
+---
+import VoxelLogo from "./VoxelLogo.astro";
+import { nav, site } from "../data/site";
+---
+
+<header class="hdr" data-nav>
+  <div class="wrap hdr-inner">
+    <a class="brand" href="#top" aria-label={`${site.name} home`}>
+      <VoxelLogo size={22} />
+      <span class="brand-name">{site.name}</span>
+      <span class="brand-ver">v{site.version}</span>
+    </a>
+
+    <!-- Desktop nav -->
+    <nav class="navlinks" aria-label="Section navigation">
+      {nav.map((n) => <a href={n.href}>{n.label}</a>)}
+    </nav>
+
+    <div class="hdr-cta">
+      <a class="btn btn--primary btn--sm" href="/play">▶ Play</a>
+    </div>
+
+    <!-- Mobile menu (CSS/disclosure, no JS for toggle) -->
+    <details class="menubar">
+      <summary aria-label="Open menu">
+        <span class="burger" aria-hidden="true"></span>
+      </summary>
+      <nav class="mobile-nav" aria-label="Mobile section navigation">
+        {nav.map((n) => (
+          <a href={n.href}>{n.label}</a>
+        ))}
+        <a class="btn btn--primary" href="/play">▶ Play VOXL</a>
+      </nav>
+    </details>
+  </div>
+</header>
+
+<style>
+  .hdr {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(8, 12, 28, 0.72);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .hdr-inner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: 64px;
+    padding-block: 0.5rem;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--mono);
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    color: var(--ink);
+    margin-right: auto;
+    text-decoration: none;
+  }
+  .brand:hover {
+    text-decoration: none;
+  }
+  .brand-name {
+    font-size: 1.05rem;
+  }
+  .brand-ver {
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    color: var(--ink-mute);
+    border: 1px solid var(--border);
+    padding: 0.1rem 0.4rem;
+    border-radius: 6px;
+  }
+
+  .navlinks {
+    display: none;
+    gap: 0.3rem;
+  }
+  .navlinks a {
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+    padding: 0.5rem 0.7rem;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: color 0.15s ease, background 0.15s ease;
+  }
+  .navlinks a:hover,
+  .navlinks a.is-active {
+    color: var(--ink);
+    background: var(--bg-2);
+  }
+
+  .hdr-cta {
+    display: none;
+  }
+  .btn--sm {
+    padding: 0.55rem 1rem;
+    font-size: 0.88rem;
+  }
+
+  /* mobile disclosure */
+  .menubar {
+    position: relative;
+  }
+  .menubar > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+  }
+  .menubar > summary::-webkit-details-marker {
+    display: none;
+  }
+  .burger,
+  .burger::before,
+  .burger::after {
+    display: block;
+    width: 20px;
+    height: 2px;
+    background: var(--ink);
+    border-radius: 2px;
+  }
+  .burger {
+    position: relative;
+  }
+  .burger::before,
+  .burger::after {
+    content: "";
+    position: absolute;
+    left: 0;
+  }
+  .burger::before {
+    top: -6px;
+  }
+  .burger::after {
+    top: 6px;
+  }
+  .menubar[open] .burger {
+    background: transparent;
+  }
+  .menubar[open] .burger::before {
+    transform: translateY(6px) rotate(45deg);
+  }
+  .menubar[open] .burger::after {
+    transform: translateY(-6px) rotate(-45deg);
+  }
+
+  .mobile-nav {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    min-width: 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.6rem;
+    background: var(--panel-solid);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-soft);
+  }
+  .mobile-nav a {
+    font-family: var(--mono);
+    font-size: 0.9rem;
+    color: var(--ink-dim);
+    padding: 0.6rem 0.7rem;
+    border-radius: 8px;
+    text-decoration: none;
+  }
+  .mobile-nav a:hover {
+    color: var(--ink);
+    background: var(--bg-2);
+    text-decoration: none;
+  }
+  .mobile-nav .btn {
+    margin-top: 0.4rem;
+  }
+
+  @media (min-width: 860px) {
+    .navlinks {
+      display: flex;
+    }
+    .hdr-cta {
+      display: block;
+    }
+    .menubar {
+      display: none;
+    }
+  }
+</style>

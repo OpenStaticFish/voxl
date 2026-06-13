@@ -1,0 +1,27 @@
+{
+  "name": "voxl",
+  "version": "1.0.0",
+  "description": "VOXL — an original browser-based WebGL voxel sandbox prototype.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "game:dev": "vite",
+    "site:dev": "cd website && bun run dev",
+    "build": "vite build",
+    "site:build": "cd website && bun run build",
+    "preview": "vite preview --host",
+    "site:preview": "cd website && bun run preview",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck",
+    "screenshot": "bun scripts/screenshot.ts"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  }
+}

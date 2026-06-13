@@ -1,0 +1,105 @@
+---
+import VoxelLogo from "./VoxelLogo.astro";
+import { site } from "../data/site";
+const year = new Date().getFullYear();
+---
+
+<footer class="ftr">
+  <div class="wrap ftr-inner">
+    <div class="ftr-brand">
+      <VoxelLogo size={22} />
+      <div>
+        <p class="ftr-name">{site.name}</p>
+        <p class="ftr-tag">{site.tagline}</p>
+      </div>
+    </div>
+
+    <nav class="ftr-nav" aria-label="Footer">
+      <a href="#features">Features</a>
+      <a href="#showcase">Showcase</a>
+      <a href="#controls">Controls</a>
+      <a href="#tech">Tech</a>
+      <a href="#status">Status</a>
+      <a href="/play">Play</a>
+    </nav>
+
+    <div class="ftr-meta">
+      <p>{site.stack}</p>
+      <p>© {year} {site.name} — an original indie prototype.</p>
+      <p class="ftr-legal">
+        Not affiliated with, endorsed by, or derived from Minecraft, Mojang or
+        Microsoft. No copyrighted assets are used. Built as a self-contained
+        capability benchmark.
+      </p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .ftr {
+    border-top: 1px solid var(--border-soft);
+    background: #070b1a;
+    padding-block: clamp(36px, 5vw, 56px);
+  }
+  .ftr-inner {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: clamp(20px, 4vw, 48px);
+    align-items: start;
+  }
+  .ftr-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .ftr-name {
+    margin: 0;
+    font-family: var(--mono);
+    font-weight: 800;
+    letter-spacing: 0.12em;
+  }
+  .ftr-tag {
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--ink-mute);
+  }
+  .ftr-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    justify-content: center;
+  }
+  .ftr-nav a {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--ink-dim);
+    text-decoration: none;
+  }
+  .ftr-nav a:hover {
+    color: var(--teal);
+  }
+  .ftr-meta {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--ink-mute);
+  }
+  .ftr-meta p {
+    margin: 0 0 0.3rem;
+  }
+  .ftr-legal {
+    max-width: 38ch;
+  }
+  @media (max-width: 760px) {
+    .ftr-inner {
+      grid-template-columns: 1fr;
+      text-align: left;
+    }
+    .ftr-nav {
+      justify-content: flex-start;
+    }
+    .ftr-meta {
+      text-align: left;
+    }
+  }
+</style>

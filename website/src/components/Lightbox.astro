@@ -1,0 +1,78 @@
+---
+// Progressive-enhancement lightbox. The <dialog> is only usable if JS wires it
+// up (in Layout.astro). Without JS it simply never opens — screenshots remain
+// visible in their frames.
+---
+
+<dialog id="lightbox" class="lightbox" aria-label="Screenshot viewer">
+  <div class="lightbox-inner">
+    <img id="lightbox-img" src="" alt="" />
+    <p id="lightbox-cap" class="lightbox-cap"></p>
+  </div>
+  <button class="lightbox-close" type="button" value="cancel" aria-label="Close viewer">✕</button>
+</dialog>
+
+<style>
+  .lightbox {
+    border: none;
+    background: transparent;
+    padding: 0;
+    max-width: none;
+    max-height: none;
+    width: 100%;
+    height: 100%;
+    color: var(--ink);
+  }
+  .lightbox::backdrop {
+    background: rgba(4, 7, 18, 0.86);
+    backdrop-filter: blur(4px);
+  }
+  .lightbox[open] {
+    display: grid;
+    place-items: center;
+    animation: lb-in 0.16s ease;
+  }
+  @keyframes lb-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .lightbox-inner {
+    max-width: min(1100px, 92vw);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .lightbox-inner img {
+    max-width: 100%;
+    max-height: 78vh;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow-soft);
+  }
+  .lightbox-cap {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 0.88rem;
+    color: var(--ink-dim);
+    text-align: center;
+    max-width: 70ch;
+  }
+  .lightbox-close {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--ink);
+    font-size: 1.1rem;
+    cursor: pointer;
+  }
+  .lightbox-close:hover {
+    border-color: var(--teal);
+  }
+</style>

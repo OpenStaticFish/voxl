@@ -1,0 +1,131 @@
+---
+import { features, blockPalette } from "../data/site";
+---
+
+<section id="features" class="features" aria-labelledby="features-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">Features</p>
+      <h2 id="features-title">Built for a real creative session</h2>
+      <p class="lede">
+        Every feature is tuned for a stable, playable core rather than a long
+        list that only works on the surface. Here's what's actually in the box.
+      </p>
+    </div>
+
+    <ul class="feature-grid">
+      {features.map((f) => (
+        <li class="card card--accent feature">
+          <span class="feature-ic" aria-hidden="true">{f.icon}</span>
+          <h3>{f.title}</h3>
+          <p>{f.body}</p>
+        </li>
+      ))}
+    </ul>
+
+    <div class="palette" aria-labelledby="palette-title">
+      <h3 id="palette-title" class="palette-title">The creative palette</h3>
+      <p class="palette-sub">Nine blocks in the hotbar — select with <kbd>1</kbd>–<kbd>9</kbd>, scroll, or <kbd>F</kbd>.</p>
+      <ul class="palette-list">
+        {blockPalette.map((b, i) => (
+          <li class="palette-block" title={b.name}>
+            <span class="swatch" style={`background:${b.color}`}></span>
+            <span class="swatch-num">{i + 1}</span>
+            <span class="swatch-name">{b.name}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  </div>
+</section>
+
+<style>
+  .features {
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+  }
+  .feature-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: clamp(14px, 2vw, 22px);
+  }
+  .feature {
+    display: flex;
+    flex-direction: column;
+  }
+  .feature p {
+    color: var(--ink-dim);
+    font-size: 0.95rem;
+    margin: 0;
+  }
+  .feature h3 {
+    margin: 0.7rem 0 0.5rem;
+    color: var(--ink);
+  }
+  .feature-ic {
+    width: 46px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    font-size: 1.5rem;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.25);
+  }
+
+  .palette {
+    margin-top: clamp(28px, 4vw, 44px);
+    padding: 1.4rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel-solid);
+  }
+  .palette-title {
+    margin: 0 0 0.2rem;
+  }
+  .palette-sub {
+    margin: 0 0 1rem;
+    color: var(--ink-dim);
+    font-size: 0.92rem;
+  }
+  .palette-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.6rem;
+  }
+  .palette-block {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border-soft);
+    border-radius: 9px;
+    background: var(--bg-2);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+    color: var(--ink-dim);
+    position: relative;
+  }
+  .swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+    box-shadow:
+      inset 0 -7px 0 rgba(0, 0, 0, 0.25),
+      inset 0 3px 0 rgba(255, 255, 255, 0.16);
+    flex: none;
+  }
+  .swatch-num {
+    color: var(--ink-mute);
+    font-size: 0.72rem;
+  }
+  .swatch-name {
+    color: var(--ink);
+  }
+</style>

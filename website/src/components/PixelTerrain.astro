@@ -1,0 +1,91 @@
+---
+// Deterministic pixel-terrain silhouette rendered as a row of <rect> voxels.
+// Each "layer" is a back-to-front band; the hero stacks several for depth.
+// Heights come from a small sum-of-sines profile (no RNG → stable builds).
+interface Props {
+  /** Base Y (top of band) as fraction of the viewbox height [0..1]. */
+  base?: number;
+  /** Amplitude as fraction of viewbox height. */
+  amp?: number;
+  /** Fill colour. */
+  color: string;
+  /** Sub-surface "dirt/stone" colour, drawn beneath the cap. */
+  subColor?: string;
+  /** Higher = busier terrain. */
+  freq?: number;
+  /** Phase offset to vary layers. */
+  phase?: number;
+  /** Overall opacity. */
+  opacity?: number;
+  /** Pixel width of one voxel block (viewbox units). */
+  block?: number;
+  /** Render the blocky cap highlight strip. */
+  cap?: boolean;
+  class?: string;
+}
+
+const {
+  base = 0.62,
+  amp = 0.18,
+  color,
+  subColor,
+  freq = 3,
+  phase = 0,
+  opacity = 1,
+  block = 8,
+  cap = true,
+  class: cls = "",
+} = Astro.props;
+
+const W = 1200; // viewbox width
+const H = 320; // viewbox height
+const cols = Math.ceil(W / block);
+const capH = Math.max(4, block); // grass cap thickness
+
+// Sum-of-sines profile → smooth but blocky when quantized to columns.
+function heightAt(i: number): number {
+  const x = (i / cols) * Math.PI * 2;
+  return (
+    0.5
+    + 0.5 * Math.sin(x * freq + phase)
+    + 0.22 * Math.sin(x * (freq * 2.3) + phase * 1.7)
+    + 0.12 * Math.sin(x * (freq * 4.1) + 2.1)
+  );
+}
+
+const rects: string[] = [];
+const capRects: string[] = [];
+for (let i = 0; i < cols; i++) {
+  const n = heightAt(i);
+  const top = (base - amp * (n - 0.5)) * H;
+  const h = H - top;
+  const x = i * block;
+  rects.push(`<rect x="${x}" y="${top.toFixed(1)}" width="${block}" height="${h.toFixed(1)}" fill="${subColor ?? color}"/>`);
+  capRects.push(`<rect x="${x}" y="${top.toFixed(1)}" width="${block}" height="${capH}" fill="${color}"/>`);
+}
+---
+
+<svg
+  class={`pixel-terrain ${cls}`}
+  viewBox={`0 0 ${W} ${H}`}
+  preserveAspectRatio="none"
+  aria-hidden="true"
+  focusable="false"
+  style={`opacity:${opacity}`}
+>
+  <Fragment set:html={rects.join("")} />
+  {cap && <Fragment set:html={capRects.join("")} />}
+</svg>
+
+<style>
+  .pixel-terrain {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    display: block;
+    /* keep voxels crisp-ish, no blur on upscale */
+    shape-rendering: crispEdges;
+  }
+</style>

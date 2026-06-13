@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" shape-rendering="crispEdges" font-family="monospace">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0c1430" />
+      <stop offset="1" stop-color="#0a1124" />
+    </linearGradient>
+    <linearGradient id="wm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" />
+      <stop offset="0.6" stop-color="#9ff3c3" />
+      <stop offset="1" stop-color="#37c46a" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#sky)" />
+  <!-- sun -->
+  <circle cx="600" cy="150" r="90" fill="#f5a524" fill-opacity="0.35" />
+  <!-- pixel terrain layers -->
+  <path d="M0 470 L160 400 L300 450 L470 360 L640 430 L800 380 L980 440 L1200 400 L1200 630 L0 630 Z" fill="#2a3458" opacity="0.6" />
+  <path d="M0 520 L140 470 L280 510 L420 450 L600 500 L760 460 L940 510 L1200 470 L1200 630 L0 630 Z" fill="#5fa84a" />
+  <rect x="0" y="510" width="1200" height="16" fill="#5fa84a" />
+  <rect x="0" y="526" width="1200" height="104" fill="#866040" />
+  <!-- wordmark -->
+  <text x="600" y="300" text-anchor="middle" font-size="150" font-weight="800" letter-spacing="14" fill="url(#wm)">VOXL</text>
+  <text x="600" y="360" text-anchor="middle" font-size="30" letter-spacing="4" fill="#2dd4bf">AN ORIGINAL VOXEL SANDBOX PROTOTYPE</text>
+  <!-- logo blocks -->
+  <rect x="560" y="120" width="26" height="26" fill="#37c46a" />
+  <rect x="588" y="120" width="26" height="26" fill="#2dd4bf" />
+  <rect x="616" y="120" width="26" height="26" fill="#f5a524" />
+</svg>

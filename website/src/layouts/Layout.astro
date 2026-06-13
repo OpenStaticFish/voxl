@@ -1,0 +1,112 @@
+---
+import BaseHead from "../components/BaseHead.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import Lightbox from "../components/Lightbox.astro";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <BaseHead />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <Header />
+    <main id="main">
+      <slot />
+    </main>
+    <Footer />
+
+    <!-- Optional progressive enhancement: full-size screenshot viewer. -->
+    <Lightbox />
+
+    <!-- Small, guarded enhancement script (active nav + lightbox). -->
+    <script>
+      // Active-section highlighting in the header nav.
+      const links = Array.from(
+        document.querySelectorAll<HTMLAnchorElement>("[data-nav] a"),
+      );
+      const sections = links
+        .map((a) => document.querySelector(a.getAttribute("href") ?? ""))
+        .filter((el): el is HTMLElement => el instanceof HTMLElement);
+
+      if (sections.length && "IntersectionObserver" in window) {
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (!e.isIntersecting) continue;
+              const id = "#" + e.target.id;
+              links.forEach((a) =>
+                a.classList.toggle("is-active", a.getAttribute("href") === id),
+              );
+            }
+          },
+          { rootMargin: "-45% 0px -50% 0px", threshold: 0 },
+        );
+        sections.forEach((s) => io.observe(s));
+      }
+
+      // Lightbox: any [data-shot] opens its full src in the dialog.
+      const dialog = document.getElementById("lightbox") as HTMLDialogElement | null;
+      const lbImg = document.getElementById(
+        "lightbox-img",
+      ) as HTMLImageElement | null;
+      const lbCap = document.getElementById("lightbox-cap");
+      if (dialog && lbImg) {
+        document.querySelectorAll<HTMLElement>("[data-shot]").forEach((el) => {
+          el.addEventListener("click", () => {
+            const src = el.dataset.shot;
+            const cap = el.dataset.cap;
+            if (!src) return;
+            lbImg.src = src;
+            lbImg.alt = el.dataset.alt ?? "";
+            if (lbCap) lbCap.textContent = cap ?? "";
+            dialog.showModal();
+          });
+        });
+        dialog.addEventListener("click", (e) => {
+          if (e.target === dialog) dialog.close();
+        });
+      }
+
+      // Copy-to-clipboard for command blocks.
+      document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const text = btn.dataset.copy ?? "";
+          try {
+            await navigator.clipboard.writeText(text);
+            const prev = btn.textContent;
+            btn.textContent = "copied!";
+            btn.classList.add("copied");
+            window.setTimeout(() => {
+              btn.textContent = prev;
+              btn.classList.remove("copied");
+            }, 1200);
+          } catch {
+            /* clipboard unavailable — text remains selectable */
+          }
+        });
+      });
+    </script>
+
+    <style>
+      .skip-link {
+        position: absolute;
+        left: 0.5rem;
+        top: -3rem;
+        z-index: 200;
+        background: var(--grass);
+        color: #06210f;
+        font-family: var(--mono);
+        font-weight: 700;
+        padding: 0.6rem 1rem;
+        border-radius: 8px;
+        transition: top 0.15s ease;
+      }
+      .skip-link:focus {
+        top: 0.5rem;
+      }
+    </style>
+  </body>
+</html>

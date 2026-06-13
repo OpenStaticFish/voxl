@@ -1,0 +1,58 @@
+---
+// The VOXL mark: three bobbing voxel blocks (green / teal / amber), matching
+// the game's own logo (src/ui/ui.css `.logo-blocks`). Pure CSS, aria-hidden.
+interface Props {
+  size?: number;
+  class?: string;
+}
+const { size = 26, class: cls = "" } = Astro.props;
+---
+
+<span class={`vlogo ${cls}`} style={`--s:${size}px`} aria-hidden="true">
+  <span class="vb vb--grass"></span>
+  <span class="vb vb--teal"></span>
+  <span class="vb vb--amber"></span>
+</span>
+
+<style>
+  .vlogo {
+    display: inline-flex;
+    gap: 0.32em;
+    align-items: flex-end;
+  }
+  .vb {
+    width: var(--s);
+    height: var(--s);
+    border-radius: 22%;
+    box-shadow:
+      inset 0 calc(var(--s) * -0.28) 0 rgba(0, 0, 0, 0.26),
+      inset 0 calc(var(--s) * 0.12) 0 rgba(255, 255, 255, 0.22),
+      0 calc(var(--s) * 0.18) 0 rgba(0, 0, 0, 0.36);
+    animation: vbob 2.4s ease-in-out infinite;
+  }
+  .vb--grass {
+    background: var(--grass);
+  }
+  .vb--teal {
+    background: var(--teal);
+    animation-delay: 0.18s;
+  }
+  .vb--amber {
+    background: var(--amber);
+    animation-delay: 0.36s;
+  }
+  @keyframes vbob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(calc(var(--s) * -0.26));
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vb {
+      animation: none;
+    }
+  }
+</style>

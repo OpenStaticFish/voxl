@@ -1,0 +1,286 @@
+---
+import { getShots } from "../data/screenshots";
+
+// Runs at build time: only present === true when the PNG truly exists on disk.
+const shots = getShots();
+const missingCount = shots.filter((s) => !s.present).length;
+---
+
+<section id="showcase" class="showcase" aria-labelledby="showcase-title">
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">Showcase</p>
+      <h2 id="showcase-title">The world, in view</h2>
+      <p class="lede">
+        VOXL is built to compose well on screen — grassy hills, trees,
+        shorelines and a fog-softened horizon. Real captures are shown here once
+        they've been added; until then, the frames below are clearly marked
+        placeholders.
+      </p>
+    </div>
+
+    {missingCount > 0 && (
+      <p class="notice" role="note">
+        <strong>Heads up:</strong> {missingCount} of {shots.length} screenshots
+        aren't in the project yet. Capture them from the running game with the
+        <kbd>P</kbd> key and drop them into
+        <code>website/public/screenshots/</code> — the placeholders are replaced
+        automatically on the next build.
+      </p>
+    )}
+
+    <ul class="shot-grid">
+      {shots.map((s) => (
+        <li class="shot">
+          {s.present ? (
+            <button
+              class="shot-frame shot-frame--real"
+              type="button"
+              data-shot={s.src}
+              data-cap={s.caption}
+              data-alt={s.alt}
+              aria-label={`Enlarge: ${s.title}`}
+            >
+              <img src={s.src} alt={s.alt} width="1280" height="720" loading="lazy" decoding="async" />
+              <span class="shot-tag shot-tag--real">Real screenshot · {s.sizeLabel}</span>
+            </button>
+          ) : (
+            <div class="shot-frame shot-frame--placeholder" aria-label={`Placeholder for ${s.title}`} role="img">
+              <div class="ph-scene" aria-hidden="true">
+                <span class="ph-sun"></span>
+                <span class="ph-cloud"></span>
+                <span class="ph-terrain"></span>
+              </div>
+              <span class="shot-tag shot-tag--placeholder">Placeholder</span>
+              <span class="ph-text">No screenshot yet</span>
+            </div>
+          )}
+          <div class="shot-meta">
+            <h3>{s.title}</h3>
+            <p>{s.caption}</p>
+            <code class="shot-path">{s.file}</code>
+          </div>
+        </li>
+      ))}
+    </ul>
+
+    <details class="howto">
+      <summary>How to capture these screenshots from the game</summary>
+      <div class="howto-body">
+        <p>
+          The game ships with two capture paths (documented in the repo
+          <code>README.md</code>):
+        </p>
+        <ol>
+          <li>
+            <strong>Manual (no extra deps):</strong> run the game
+            (<code>bun run dev</code> at the repo root), open it, and press
+            <kbd>P</kbd> in-game. The canvas PNG downloads — save it with the
+            exact filename shown under each frame above into
+            <code>website/public/screenshots/</code>.
+          </li>
+          <li>
+            <strong>Automated:</strong> from the repo root, run
+            <code>bun run screenshot</code> (uses Playwright) to capture both
+            files at once, then copy them into
+            <code>website/public/screenshots/</code>.
+          </li>
+        </ol>
+        <p>
+          After adding the files, rebuild the site (<code>bun run build</code>) —
+          the real images replace the placeholders automatically.
+        </p>
+      </div>
+    </details>
+  </div>
+</section>
+
+<style>
+  .showcase {
+    background: var(--bg-1);
+  }
+
+  .notice {
+    background: rgba(245, 165, 36, 0.08);
+    border: 1px solid rgba(245, 165, 36, 0.4);
+    border-left-width: 4px;
+    color: var(--ink-dim);
+    padding: 0.9rem 1.1rem;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    margin-bottom: 1.6rem;
+  }
+  .notice strong {
+    color: var(--amber);
+  }
+
+  .shot-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+    gap: clamp(16px, 2.5vw, 28px);
+  }
+  .shot {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .shot-frame {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow-soft);
+    width: 100%;
+    padding: 0;
+    background: #06091a;
+  }
+  .shot-frame--real {
+    cursor: zoom-in;
+    display: block;
+    transition: transform 0.12s ease, border-color 0.12s ease;
+  }
+  .shot-frame--real:hover {
+    border-color: var(--teal);
+    transform: translateY(-3px);
+  }
+  .shot-frame--real img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* placeholder */
+  .shot-frame--placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(180deg, #16224a, #0c1530);
+    border-style: dashed;
+    border-color: rgba(245, 165, 36, 0.45);
+  }
+  .ph-scene {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+  .ph-sun {
+    position: absolute;
+    top: 18%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(245, 165, 36, 0.6), transparent 65%);
+  }
+  .ph-cloud {
+    position: absolute;
+    top: 30%;
+    left: 20%;
+    width: 16px;
+    height: 9px;
+    background: rgba(220, 230, 255, 0.5);
+    box-shadow: 10px 0 0 rgba(220, 230, 255, 0.5), 5px -9px 0 rgba(220, 230, 255, 0.5), 22px 0 0 rgba(220, 230, 255, 0.5);
+  }
+  .ph-terrain {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 42%;
+    background:
+      linear-gradient(180deg, var(--blk-grass) 0 14%, var(--blk-dirt) 14% 50%, var(--blk-stone) 50% 100%);
+    clip-path: polygon(
+      0 38%, 12% 24%, 22% 32%, 34% 14%, 48% 26%, 60% 18%,
+      72% 30%, 84% 20%, 100% 34%, 100% 100%, 0 100%
+    );
+  }
+  .ph-text {
+    position: relative;
+    z-index: 1;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+    background: rgba(8, 12, 28, 0.7);
+    padding: 0.4rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .shot-tag {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    padding: 0.25rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(8, 12, 28, 0.8);
+  }
+  .shot-tag--real {
+    color: var(--grass);
+    border-color: rgba(55, 196, 106, 0.5);
+  }
+  .shot-tag--placeholder {
+    color: var(--amber);
+    border-color: rgba(245, 165, 36, 0.5);
+  }
+
+  .shot-meta {
+    padding-top: 0.9rem;
+  }
+  .shot-meta h3 {
+    margin: 0 0 0.2rem;
+  }
+  .shot-meta p {
+    margin: 0;
+    color: var(--ink-dim);
+    font-size: 0.92rem;
+  }
+  .shot-path {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-size: 0.78rem;
+    color: var(--ink-mute);
+  }
+
+  .howto {
+    margin-top: 1.8rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--panel-solid);
+    padding: 0.2rem 1.1rem;
+  }
+  .howto summary {
+    cursor: pointer;
+    padding: 0.9rem 0;
+    font-family: var(--mono);
+    font-size: 0.92rem;
+    color: var(--ink-dim);
+    list-style: none;
+  }
+  .howto summary::-webkit-details-marker {
+    display: none;
+  }
+  .howto summary::before {
+    content: "▸ ";
+    color: var(--teal);
+  }
+  .howto[open] summary::before {
+    content: "▾ ";
+  }
+  .howto-body {
+    padding-bottom: 1.1rem;
+    color: var(--ink-dim);
+    font-size: 0.95rem;
+  }
+</style>

@@ -1,0 +1,226 @@
+---
+import VoxelLogo from "./VoxelLogo.astro";
+import PixelTerrain from "./PixelTerrain.astro";
+import { site } from "../data/site";
+---
+
+<section id="top" class="hero" aria-labelledby="hero-title">
+  <div class="hero-sky" aria-hidden="true">
+    <div class="sun"></div>
+    <div class="cloud cloud--a"></div>
+    <div class="cloud cloud--b"></div>
+    <div class="cloud cloud--c"></div>
+    <!-- layered pixel terrain: back mountains → mid hills → front cap -->
+    <PixelTerrain base={0.5} amp={0.16} freq={2.2} phase={1.0} color="#3a4a78" subColor="#2a3458" opacity={0.55} />
+    <PixelTerrain base={0.66} amp={0.2} freq={3.4} phase={2.4} color="var(--blk-grass)" subColor="var(--blk-dirt)" opacity={0.85} />
+    <PixelTerrain base={0.8} amp={0.12} freq={5.0} phase={0.4} color="var(--grass)" subColor="var(--blk-dirt)" opacity={1} />
+    <div class="water"></div>
+  </div>
+
+  <div class="wrap hero-inner">
+    <VoxelLogo size={30} />
+    <p class="eyebrow">Browser · WebGL · Prototype</p>
+    <h1 id="hero-title" class="wordmark">VOXL</h1>
+    <p class="hero-sub">{site.tagline}</p>
+    <p class="hero-pitch">
+      Drop into a procedurally generated world of plains, forests, deserts and
+      mountains. Sculpt terrain block by block, fly over the canopy, and watch
+      chunks stream in around you — all in your browser, no install required.
+    </p>
+
+    <div class="btn-row hero-btns">
+      <a class="btn btn--primary" href="/play">▶ Play in your browser</a>
+      <a class="btn" href="#showcase">See the world</a>
+    </div>
+
+    <ul class="hero-chips" aria-label="Project facts">
+      <li class="chip"><b>v{site.version}</b> creative slice</li>
+      <li class="chip"><span class="dot" style="background:var(--grass)"></span> Runs in any modern browser</li>
+      <li class="chip"><span class="dot" style="background:var(--teal)"></span> Deterministic seed worlds</li>
+      <li class="chip"><span class="dot" style="background:var(--amber)"></span> {site.bundleGzip} gzipped</li>
+    </ul>
+  </div>
+
+  <a class="scroll-hint" href="#pitch" aria-label="Scroll to overview">
+    <span class="mouse" aria-hidden="true"><span class="wheel"></span></span>
+  </a>
+</section>
+
+<style>
+  .hero {
+    position: relative;
+    min-height: clamp(560px, 92vh, 820px);
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    padding-block: 120px var(--section-y);
+    background:
+      radial-gradient(120% 80% at 50% -10%, rgba(55, 196, 106, 0.1), transparent 60%),
+      linear-gradient(180deg, #0c1430 0%, #0e1738 45%, #0a1124 100%);
+  }
+
+  .hero-sky {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+
+  .sun {
+    position: absolute;
+    top: 8%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: clamp(120px, 16vw, 220px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, rgba(245, 165, 36, 0.5), rgba(245, 165, 36, 0.12) 55%, transparent 70%);
+    filter: blur(2px);
+  }
+
+  /* Blocky pixel clouds: a small square + box-shadow puffs. */
+  .cloud {
+    position: absolute;
+    width: 26px;
+    height: 14px;
+    background: rgba(220, 230, 255, 0.85);
+    box-shadow:
+      14px 0 0 rgba(220, 230, 255, 0.85),
+      28px 0 0 rgba(220, 230, 255, 0.85),
+      7px -14px 0 rgba(220, 230, 255, 0.85),
+      21px -14px 0 rgba(220, 230, 255, 0.85),
+      42px 0 0 rgba(220, 230, 255, 0.85),
+      -7px 0 0 rgba(220, 230, 255, 0.85);
+    image-rendering: pixelated;
+    animation: drift 60s linear infinite;
+    opacity: 0.7;
+  }
+  .cloud--a {
+    top: 16%;
+    left: -10%;
+    transform: scale(1.1);
+  }
+  .cloud--b {
+    top: 26%;
+    left: -20%;
+    transform: scale(0.8);
+    animation-duration: 90s;
+    animation-delay: -20s;
+    opacity: 0.5;
+  }
+  .cloud--c {
+    top: 11%;
+    left: -30%;
+    transform: scale(1.4);
+    animation-duration: 120s;
+    animation-delay: -50s;
+    opacity: 0.45;
+  }
+  @keyframes drift {
+    to {
+      left: 120%;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .cloud {
+      animation: none;
+    }
+  }
+
+  .water {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 4.5%;
+    background: linear-gradient(180deg, rgba(54, 110, 196, 0.55), rgba(20, 50, 110, 0.9));
+    border-top: 2px solid rgba(120, 170, 255, 0.4);
+  }
+
+  .hero-inner {
+    position: relative;
+    z-index: 2;
+    max-width: 70ch;
+  }
+
+  .wordmark {
+    font-size: clamp(4rem, 15vw, 9rem);
+    letter-spacing: 0.12em;
+    margin: 0.1em 0 0;
+    line-height: 0.9;
+    background: linear-gradient(180deg, #ffffff, #9ff3c3 58%, var(--grass));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 8px 0 rgba(0, 0, 0, 0.32);
+  }
+
+  .hero-sub {
+    font-family: var(--mono);
+    color: var(--teal);
+    font-size: clamp(0.95rem, 2vw, 1.15rem);
+    letter-spacing: 0.06em;
+    margin: 0.4rem 0 1.2rem;
+  }
+
+  .hero-pitch {
+    font-size: 1.12rem;
+    color: var(--ink-dim);
+    max-width: 56ch;
+    margin-bottom: 1.6rem;
+  }
+
+  .hero-btns {
+    margin-bottom: 1.6rem;
+  }
+
+  .hero-chips {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .scroll-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    z-index: 2;
+    color: var(--ink-mute);
+  }
+  .mouse {
+    display: block;
+    width: 24px;
+    height: 38px;
+    border: 2px solid var(--ink-mute);
+    border-radius: 12px;
+    position: relative;
+  }
+  .wheel {
+    position: absolute;
+    left: 50%;
+    top: 7px;
+    width: 3px;
+    height: 7px;
+    margin-left: -1.5px;
+    background: var(--ink-mute);
+    border-radius: 2px;
+    animation: wheel 1.6s ease-in-out infinite;
+  }
+  @keyframes wheel {
+    0% { opacity: 0; transform: translateY(0); }
+    40% { opacity: 1; }
+    100% { opacity: 0; transform: translateY(10px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wheel { animation: none; }
+  }
+
+  @media (max-width: 560px) {
+    .hero-chips .chip:nth-child(n + 4) {
+      display: none;
+    }
+  }
+</style>

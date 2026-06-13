@@ -1,0 +1,24 @@
+{
+  "name": "voxl-website",
+  "version": "1.0.0",
+  "description": "Marketing & info site for VOXL — an original browser-based WebGL voxel sandbox prototype.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "sync:game": "bun scripts/sync-game.ts",
+    "dev": "bun run sync:game && astro dev",
+    "build": "bun run sync:game && astro build",
+    "preview": "astro preview --host",
+    "typecheck": "astro check",
+    "check": "astro check",
+    "screenshot": "bun scripts/screenshot.ts"
+  },
+  "dependencies": {
+    "astro": "^6.4.6"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.4",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

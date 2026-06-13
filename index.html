@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0b1020" />
+    <meta name="description" content="VOXL — an original browser-based WebGL voxel sandbox prototype." />
+    <title>VOXL — Voxel Sandbox</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2337c46a'/%3E%3Cpath d='M0 0h16v4H0z' fill='%235bd97f'/%3E%3Cpath d='M0 12h16v4H0z' fill='%238a5a34'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/ui/ui.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- The game canvas is created and managed by the Renderer. -->
+      <div id="game-root"></div>
+
+      <!-- ===== Main Menu ===== -->
+      <section id="main-menu" class="screen menu-root" aria-label="Main menu">
+        <div class="menu-backdrop"></div>
+        <div class="menu-panel">
+          <div class="logo-blocks" aria-hidden="true">
+            <span class="lb lb1"></span><span class="lb lb2"></span><span class="lb lb3"></span>
+          </div>
+          <h1 class="game-title">VOXL</h1>
+          <p class="game-subtitle">An original voxel sandbox prototype</p>
+          <div class="menu-actions">
+            <button id="btn-play" class="btn btn-primary">Play</button>
+            <button id="btn-settings" class="btn">Settings</button>
+            <button id="btn-controls" class="btn">Controls</button>
+          </div>
+          <p class="menu-hint">Tip: press <kbd>P</kbd> anytime in-game to capture a screenshot.</p>
+          <p class="menu-seed">World seed: <span id="menu-seed">—</span></p>
+        </div>
+        <div class="menu-footer">VOXL · creative sandbox slice · built with Three.js + Vite + Bun</div>
+      </section>
+
+      <!-- ===== Controls overlay ===== -->
+      <section id="controls-screen" class="screen overlay" aria-label="Controls" hidden>
+        <div class="panel">
+          <h2>Controls</h2>
+          <ul class="controls-list">
+            <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move</span></li>
+            <li><kbd>Space</kbd><span>Jump / Fly up</span></li>
+            <li><kbd>Shift</kbd><span>Fly down / descend</span></li>
+            <li><kbd>Space</kbd> ×2<span>Toggle flight</span></li>
+            <li><kbd>Ctrl</kbd><span>Sprint</span></li>
+            <li><kbd>Mouse</kbd><span>Look around</span></li>
+            <li><kbd>L-Click</kbd><span>Break block</span></li>
+            <li><kbd>R-Click</kbd><span>Place block</span></li>
+            <li><kbd>1</kbd>–<kbd>9</kbd><span>Select hotbar slot</span></li>
+            <li><kbd>Scroll</kbd><span>Cycle hotbar</span></li>
+            <li><kbd>F</kbd><span>Cycle selected block</span></li>
+            <li><kbd>P</kbd><span>Capture screenshot</span></li>
+            <li><kbd>Esc</kbd><span>Pause</span></li>
+          </ul>
+          <button class="btn btn-primary" data-back>Back</button>
+        </div>
+      </section>
+
+      <!-- ===== Settings overlay ===== -->
+      <section id="settings-screen" class="screen overlay" aria-label="Settings" hidden>
+        <div class="panel">
+          <h2>Settings</h2>
+          <div class="setting">
+            <label for="set-viewdistance">View distance</label>
+            <div class="setting-row">
+              <input type="range" id="set-viewdistance" min="2" max="10" step="1" />
+              <output id="out-viewdistance">—</output>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-sensitivity">Mouse sensitivity</label>
+            <div class="setting-row">
+              <input type="range" id="set-sensitivity" min="0.2" max="3" step="0.1" />
+              <output id="out-sensitivity">—</output>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-fov">Field of view</label>
+            <div class="setting-row">
+              <input type="range" id="set-fov" min="60" max="110" step="1" />
+              <output id="out-fov">—</output>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-fps">Show FPS</label>
+            <div class="setting-row">
+              <input type="checkbox" id="set-fps" />
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-clouds">Clouds</label>
+            <div class="setting-row">
+              <input type="checkbox" id="set-clouds" checked />
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-seed">World seed</label>
+            <div class="setting-row">
+              <input type="text" id="set-seed" class="text-input" />
+              <button class="btn btn-small" id="btn-regen">Regenerate</button>
+            </div>
+          </div>
+          <div class="panel-actions">
+            <button class="btn btn-primary" data-back>Done</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Pause menu ===== -->
+      <section id="pause-menu" class="screen overlay" aria-label="Paused" hidden>
+        <div class="panel">
+          <h2>Paused</h2>
+          <div class="menu-actions">
+            <button id="btn-resume" class="btn btn-primary">Resume</button>
+            <button id="btn-pause-settings" class="btn">Settings</button>
+            <button id="btn-quit" class="btn">Quit to menu</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== In-game HUD ===== -->
+      <div id="hud" hidden>
+        <div id="crosshair" aria-hidden="true"></div>
+        <div id="status">
+          <div id="fps" class="badge" hidden>0 fps</div>
+          <div id="mode-indicator" class="badge">Walking</div>
+          <div id="coords" class="badge">x 0  y 0  z 0</div>
+        </div>
+        <div id="hotbar" aria-label="Block selection"></div>
+        <div id="toast" class="toast" hidden></div>
+      </div>
+
+      <!-- Loading splash while world streams in -->
+      <div id="loading" class="screen loading" hidden>
+        <div class="spinner" aria-hidden="true"></div>
+        <p id="loading-text">Generating world…</p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

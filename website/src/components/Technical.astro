@@ -1,0 +1,107 @@
+---
+import { techHighlights, site } from "../data/site";
+---
+
+<section id="tech" class="tech" aria-labelledby="tech-title">
+  <div class="grid-bg" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="section-head">
+      <p class="eyebrow">Under the hood</p>
+      <h2 id="tech-title">Technical highlights</h2>
+      <p class="lede">
+        VOXL is a hand-rolled voxel engine, not an engine wrapper. The
+        interesting work is in chunk meshing, collision and streaming — written
+        to stay readable for developers without overwhelming anyone who just
+        wants to build.
+      </p>
+    </div>
+
+    <ul class="tech-grid">
+      {techHighlights.map((t) => (
+        <li class="card tech-card">
+          <h3>{t.title}</h3>
+          <p>{t.body}</p>
+        </li>
+      ))}
+    </ul>
+
+    <div class="stack-row" aria-label="Technology stack">
+      <span class="stack-label">Stack</span>
+      <ul class="stack-list">
+        <li>{site.stack.split(" · ").map((s) => <span class="stack-chip">{s}</span>)}</li>
+      </ul>
+      <span class="stack-note">Production bundle {site.bundleGzip} gzipped · no external art assets</span>
+    </div>
+  </div>
+</section>
+
+<style>
+  .tech {
+    background: linear-gradient(180deg, var(--bg-0), var(--bg-1));
+  }
+  .tech-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: clamp(14px, 2vw, 22px);
+  }
+  .tech-card p {
+    color: var(--ink-dim);
+    font-size: 0.95rem;
+    margin: 0;
+  }
+  .tech-card h3 {
+    margin: 0 0 0.5rem;
+    color: var(--ink);
+  }
+
+  .stack-row {
+    margin-top: clamp(24px, 3vw, 36px);
+    padding: 1.1rem 1.3rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel-solid);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .stack-label {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .stack-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .stack-chip {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--ink);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    padding: 0.3rem 0.7rem;
+    border-radius: 7px;
+  }
+  .stack-note {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    color: var(--ink-mute);
+  }
+  @media (max-width: 640px) {
+    .stack-note {
+      margin-left: 0;
+      width: 100%;
+    }
+  }
+</style>
