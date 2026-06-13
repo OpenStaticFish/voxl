@@ -1,0 +1,81 @@
+# Local development for VOXL: the game (Vite HMR) + the website (Astro live reload).
+#
+#   docker compose up                 # dev servers:  http://localhost:5173 (game)
+#                                    #                http://localhost:4321 (site → /play)
+#   docker compose up game            # just the game
+#   docker compose up site            # just the site (still builds & embeds the game)
+#   docker compose --profile prod up  # build & serve production images on :8080/:8081
+#
+# Both dev services bind-mount the whole repo, so edits on the host hot-reload
+# instantly. node_modules live inside the images and are shielded from the bind
+# mount by anonymous volumes — change package.json, then `docker compose build`.
+
+name: voxl
+
+# ────────────────────── Development ─────────────────────
+services:
+  game:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    container_name: voxl-game
+    # `vite` already binds 0.0.0.0:5173 (see vite.config.ts), so HMR Just Works.
+    command: bun run game:dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules        # shield image deps from the host bind mount
+    environment:
+      # Force Vite to poll for changes — needed for HMR when files are edited on
+      # a different OS (Docker Desktop on macOS/Windows). No-op on native Linux.
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+
+  site:
+    build:
+      context: .
+      dockerfile: website/Dockerfile
+      target: dev
+    container_name: voxl-site
+    working_dir: /app/website
+    # The `dev` script runs sync:game (builds + copies the game) first, then
+    # starts Astro bound to all interfaces so it's reachable from the host.
+    command: sh -c "bun run sync:game && exec bunx astro dev --host 0.0.0.0"
+    ports:
+      - "4321:4321"
+    volumes:
+      - .:/app
+      - /app/node_modules              # game deps (sync:game runs `bun run build` here)
+      - /app/website/node_modules      # site deps
+      # `dist`, `.astro`, and `public/game` are intentionally NOT volumized:
+      # they're gitignored build outputs that write through to the host bind
+      # mount — matching native `bun run sync:game` behavior (which rm+recreates
+      # `public/game`, something it can't do if the path is a mount point).
+    environment:
+      CHOKIDAR_USEPOLLING: "true"
+      WATCHPACK_POLLING: "true"
+
+# ────────────────────── Production ──────────────────────
+# `docker compose --profile prod up --build` builds both and serves the static
+# output via nginx. Useful for validating a release build locally.
+  game-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+    container_name: voxl-game-prod
+    ports:
+      - "8080:80"
+
+  site-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: website/Dockerfile
+      target: prod
+    container_name: voxl-site-prod
+    ports:
+      - "8081:80"
