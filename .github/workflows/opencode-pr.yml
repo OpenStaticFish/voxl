@@ -10,7 +10,7 @@
 #   • runs on ubuntu-latest (swap to `blacksmith-2vcpu-ubuntu-2404` if enabled)
 #
 # Provider config: the opencode action needs a model + API key. This mirrors the
-# ZigCraft convention (KIMI_API_KEY + kimi-for-coding/k2.7). To use another
+# ZigCraft convention (KIMI_API_KEY + kimi-for-coding/k2p7). To use another
 # provider, change the `model:` and the API-key env var in the "Run opencode"
 # step, and add the matching repository secret.
 
@@ -101,7 +101,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
         with:
-          model: kimi-for-coding/k2.7
+          model: kimi-for-coding/k2p7
           use_github_token: true
           prompt: ${{ env.PROMPT }}
 
