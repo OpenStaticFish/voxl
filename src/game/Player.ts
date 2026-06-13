@@ -1,4 +1,4 @@
-import { Scene, UniversalCamera, Vector3 } from "@babylonjs/core";
+import { Matrix, Scene, UniversalCamera, Vector3 } from "@babylonjs/core";
 import {
   PLAYER_HALF_WIDTH,
   PLAYER_EYE_HEIGHT,
@@ -40,9 +40,16 @@ export class Player {
   flying = false;
   onGround = false;
   inWater = false;
+  /** Whether double-tap-Space may toggle flight (creative only). */
+  canFly = true;
 
   /** Latest block targeted by the camera (for highlight + break/place). */
   target: RaycastHit | null = null;
+
+  /** Fall-damage tracking (peak Y reached while airborne, in blocks). */
+  private fallPeakY: number | null = null;
+  private wasOnGround = true;
+  private pendingFall = 0;
 
   constructor(aspect: number, scene: Scene) {
     void aspect; // Babylon derives aspect from the engine/canvas automatically.
@@ -72,8 +79,14 @@ export class Player {
     this.position.set(x + 0.5, ground + 2.2, z + 0.5);
     this.velocity.set(0, 0, 0);
     this.yaw = Math.PI * 0.25;
-    this.pitch = -0.18;
+    // Look down steeply at spawn so the ground is immediately within reach and
+    // the first click targets a block (otherwise the near-horizontal ray sails
+    // over the terrain and targeting is null).
+    this.pitch = -0.42;
     this.flying = false;
+    this.fallPeakY = null;
+    this.wasOnGround = true;
+    this.pendingFall = 0;
   }
 
   private collides(world: World, px: number, py: number, pz: number): boolean {
@@ -104,7 +117,7 @@ export class Player {
   update(dt: number, world: World, input: Input, settings: Settings): void {
     // --- Mouse look ---
     const { dx, dy } = input.consumeMouseDelta();
-    const sens = settings.mouseSensitivity * 0.0022;
+    const sens = settings.mouseSensitivity * 0.005;
     this.yaw -= dx * sens;
     this.pitch -= dy * sens;
     const lim = Math.PI / 2 - 0.02;
@@ -127,8 +140,8 @@ export class Player {
 
     const sprinting = input.isDown("ControlLeft") || input.isDown("ControlRight");
 
-    // Toggle flight on double-tap space.
-    if (input.consumeDoubleTapSpace()) {
+    // Toggle flight on double-tap space (creative only).
+    if (input.consumeDoubleTapSpace() && this.canFly) {
       this.flying = !this.flying;
     }
 
@@ -192,6 +205,8 @@ export class Player {
     }
     this.velocity.set(vx, vy, vz);
 
+    this.trackFall(pos.y);
+
     // Safety: never fall below the world.
     if (pos.y < -10) {
       pos.y = 40;
@@ -211,16 +226,89 @@ export class Player {
 
     // --- Targeting raycast ---
     // Forward = Ry(yaw) * Rx(pitch) * (0, 0, -1) — same as three.js YXZ.
-    const cp = Math.cos(this.pitch);
-    const fx = -Math.sin(this.yaw) * cp;
-    const fy = Math.sin(this.pitch);
-    const fz = -Math.cos(this.yaw) * cp;
     const eye = this.camera.position;
-    this.target = raycastVoxel(world, eye.x, eye.y, eye.z, fx, fy, fz, REACH);
+    if (input.locked) {
+      const cp = Math.cos(this.pitch);
+      const fx = -Math.sin(this.yaw) * cp;
+      const fy = Math.sin(this.pitch);
+      const fz = -Math.cos(this.yaw) * cp;
+      this.target = raycastVoxel(world, eye.x, eye.y, eye.z, fx, fy, fz, REACH);
+    } else {
+      // Pointer lock unavailable: aim via the cursor position instead so the
+      // game stays fully playable (build/mine) without mouse-look.
+      const sc = this.camera.getScene() as Scene;
+      const ray = sc.createPickingRay(sc.pointerX, sc.pointerY, Matrix.Identity(), this.camera);
+      this.target = raycastVoxel(
+        world,
+        ray.origin.x,
+        ray.origin.y,
+        ray.origin.z,
+        ray.direction.x,
+        ray.direction.y,
+        ray.direction.z,
+        REACH,
+      );
+    }
   }
 
   /** The block the camera is currently looking at (for break/place). */
   getTarget(): RaycastHit | null {
     return this.target;
+  }
+
+  /** Blocks fallen (peak → landing). Consumed once on landing; 0 otherwise. */
+  consumeFallDistance(): number {
+    const f = this.pendingFall;
+    this.pendingFall = 0;
+    return f;
+  }
+
+  private trackFall(y: number): void {
+    if (this.flying) {
+      this.fallPeakY = null;
+      this.wasOnGround = this.onGround;
+      return;
+    }
+    if (!this.onGround) {
+      if (this.fallPeakY === null) this.fallPeakY = y;
+      else if (y > this.fallPeakY) this.fallPeakY = y;
+    } else if (!this.wasOnGround) {
+      if (this.fallPeakY !== null) {
+        this.pendingFall = Math.max(0, this.fallPeakY - y);
+      }
+      this.fallPeakY = null;
+    }
+    this.wasOnGround = this.onGround;
+  }
+
+  /** Head (eye) submerged in water — used for the drowning breath meter. */
+  headSubmerged(world: World): boolean {
+    const eyeY = this.position.y + PLAYER_EYE_HEIGHT;
+    return world.getBlock(
+      Math.floor(this.position.x),
+      Math.floor(eyeY),
+      Math.floor(this.position.z),
+    ) === 7;
+  }
+
+  /** Touching a cactus block anywhere in the player's AABB. */
+  touchingCactus(world: World): boolean {
+    const px = this.position.x;
+    const py = this.position.y;
+    const pz = this.position.z;
+    const minX = Math.floor(px - HW);
+    const maxX = Math.floor(px + HW);
+    const minY = Math.floor(py);
+    const maxY = Math.floor(py + PH - 1e-3);
+    const minZ = Math.floor(pz - HW);
+    const maxZ = Math.floor(pz + HW);
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          if (world.getBlock(x, y, z) === 19) return true;
+        }
+      }
+    }
+    return false;
   }
 }

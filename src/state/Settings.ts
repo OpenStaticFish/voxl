@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   clouds: true,
   seed: DEFAULT_SEED,
+  mode: "creative",
 };
 
 export function loadSettings(): Settings {

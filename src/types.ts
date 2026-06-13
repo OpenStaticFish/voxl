@@ -35,6 +35,8 @@ export interface Settings {
   showFps: boolean;
   clouds: boolean;
   seed: string;
+  /** Survival vs creative game mode (global preference; saved per-world too). */
+  mode: "survival" | "creative";
 }
 
 /** Result of a voxel DDA raycast. */

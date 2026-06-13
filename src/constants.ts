@@ -26,7 +26,7 @@ export const FLY_SPRINT_SPEED = 24; // blocks/s
 export const TERMINAL_VELOCITY = 60;
 
 /** Reach distance for block break/place raycasts. */
-export const REACH = 6;
+export const REACH = 8;
 
 /** Max chunks generated/meshed per frame to avoid hitches. */
 export const MAX_CHUNK_GEN_PER_FRAME = 2;
