@@ -1,14 +1,11 @@
 import {
   Color3,
   DirectionalLight,
-  DynamicTexture,
   HemisphericLight,
   Mesh,
   MeshBuilder,
   Scene,
   ShaderMaterial,
-  StandardMaterial,
-  Texture,
   TransformNode,
   Vector3,
 } from "@babylonjs/core";
@@ -17,7 +14,8 @@ import { Clouds } from "./Clouds";
 const ZENITH = Color3.FromHexString("#2f6fdb");
 const HORIZON = Color3.FromHexString("#bfe3ff");
 
-/** Builds the sky: gradient dome, sun light, ambient/hemisphere fill, clouds. */
+/** Builds the sky: gradient dome, sun light, ambient/hemisphere fill, clouds.
+ *  The visual sun/moon discs live in CelestialSystem (lighting/). */
 export class Sky {
   readonly root: TransformNode;
   readonly sun: DirectionalLight;
@@ -26,9 +24,8 @@ export class Sky {
 
   private readonly scene: Scene;
   private readonly dome: Mesh;
+  private readonly domeMat: ShaderMaterial;
   private readonly clouds: Clouds;
-  private readonly sunQuad: Mesh;
-  private readonly sunOffset = new Vector3(300, 260, 200);
 
   constructor(seed = "voxl", scene: Scene) {
     this.scene = scene;
@@ -79,6 +76,7 @@ export class Sky {
     domeMat.setVector3("bottomColor", new Vector3(HORIZON.r, HORIZON.g, HORIZON.b));
     domeMat.setFloat("offset", 33);
     domeMat.setFloat("exponent", 0.6);
+    this.domeMat = domeMat;
     // Inside-out sphere: don't cull back faces, don't write depth.
     domeMat.backFaceCulling = false;
     domeMat.disableDepthWrite = true;
@@ -107,29 +105,16 @@ export class Sky {
     this.sun.diffuse = Color3.FromHexString("#fff4e0");
     this.sun.intensity = 0.85;
 
-    // --- Sun billboard (a camera-facing quad with a radial gradient texture) ---
-    const sunTex = makeRadialTexture("sun-tex", scene, "#fff6d8", "#ffd27a");
-    this.sunQuad = MeshBuilder.CreatePlane("sun", { size: 46 }, scene);
-    const sunMat = new StandardMaterial("sun-mat", scene);
-    sunMat.emissiveTexture = sunTex;
-    sunMat.opacityTexture = sunTex; // use the gradient's luminance as opacity
-    sunMat.disableLighting = true;
-    sunMat.backFaceCulling = false;
-    sunMat.disableDepthWrite = true;
-    // Always render on top of the sky dome but before world geometry.
-    sunMat.disableColorWrite = false;
-    sunMat.alpha = 1;
-    this.sunQuad.material = sunMat;
-    this.sunQuad.billboardMode = Mesh.BILLBOARDMODE_ALL;
-    this.sunQuad.applyFog = false;
-    this.sunQuad.receiveShadows = false; // sun billboard never receives/casts shadows
-    this.sunQuad.alwaysSelectAsActiveMesh = true;
-    this.sunQuad.parent = this.root;
-
     // --- Clouds (Minetest/Luanti-style voxel layer) ---
     this.clouds = new Clouds(seed, scene);
     this.clouds.mesh.parent = this.root;
     this.clouds.mesh.receiveShadows = false; // clouds never receive/casts shadows
+  }
+
+  /** Update the gradient dome colours from the day/night cycle. */
+  setDomeColours(zenith: Color3, horizon: Color3): void {
+    this.domeMat.setVector3("topColor", new Vector3(zenith.r, zenith.g, zenith.b));
+    this.domeMat.setVector3("bottomColor", new Vector3(horizon.r, horizon.g, horizon.b));
   }
 
   setCloudsEnabled(enabled: boolean): void {
@@ -145,10 +130,8 @@ export class Sky {
     this.clouds.step(dt);
     this.clouds.update(cameraPosition.x, cameraPosition.z);
 
-    // The dome uses infiniteDistance (auto-follows camera); but the sun quad
-    // and clouds still need manual anchoring.
-    this.sunQuad.setAbsolutePosition(cameraPosition.add(this.sunOffset));
-
+    // The dome uses infiniteDistance (auto-follows camera); clouds still need
+    // manual anchoring. The visual sun/moon are anchored by CelestialSystem.
     // The clouds use a custom ShaderMaterial that doesn't get scene fog for
     // free, so we bind the current fog state each frame.
     this.clouds.bindFog(
@@ -161,46 +144,11 @@ export class Sky {
 
   dispose(): void {
     this.clouds.dispose();
-    const domeMat = this.dome.material;
-    const sunMat = this.sunQuad.material;
-    const sunTex = sunMat instanceof StandardMaterial ? sunMat.opacityTexture : null;
     this.dome.dispose();
-    this.sunQuad.dispose();
-    domeMat?.dispose();
-    sunMat?.dispose();
-    if (sunTex) sunTex.dispose();
+    this.domeMat.dispose();
     this.ambient.dispose();
     this.hemi.dispose();
     this.sun.dispose();
     this.root.dispose();
   }
-}
-
-/** A soft radial-gradient texture for the sun disc. */
-function makeRadialTexture(
-  name: string,
-  scene: Scene,
-  inner: string,
-  outer: string,
-): DynamicTexture {
-  const size = 128;
-  const tex = new DynamicTexture(
-    name,
-    { width: size, height: size },
-    scene,
-    false,
-    Texture.LINEAR_LINEAR,
-    undefined,
-    false,
-  );
-  tex.hasAlpha = true;
-  const ctx = tex.getContext() as CanvasRenderingContext2D;
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0, inner);
-  g.addColorStop(0.5, outer);
-  g.addColorStop(1, "rgba(255,210,120,0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  tex.update(false);
-  return tex;
 }

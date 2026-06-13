@@ -7,13 +7,27 @@ import type { Chunk } from "./Chunk";
 import { FACE_SHADE, PLANT_SHADE } from "./lighting/LightingConfig";
 
 /**
- * Samples the final per-vertex brightness (0..1) for the cell a face looks into.
- * The world/lighting system builds this callback; the mesher never hardcodes
- * light behaviour — it only supplies the directional face shade. This lets the
- * lighting system switch between normal rendering and debug overlays (raw sun /
- * block light) without the mesher knowing.
+ * Per-vertex light sample for the cell a face looks into. The world/lighting
+ * system builds this; the mesher never hardcodes light behaviour — it only
+ * supplies the directional face shade.
+ *
+ * Two shaded channels are baked into vertex-colour .r/.g (sun, block) and two
+ * raw 0..1 levels into .b/.a for the debug overlay. The VoxelTerrainMaterial
+ * combines them with live day/night uniforms, so torch (block) light survives
+ * the night while outdoor (sun) light dims.
  */
-export type BrightnessSampler = (wx: number, wy: number, wz: number, shade: number) => number;
+export interface BrightnessSample {
+  /** face shade × brightness-curve of the sun light level */
+  sunBright: number;
+  /** face shade × brightness-curve of the block (emissive) light level */
+  blockBright: number;
+  /** raw sun level / LIGHT_MAX (0..1) — debug overlay */
+  sunLevel: number;
+  /** raw block level / LIGHT_MAX (0..1) — debug overlay */
+  blockLevel: number;
+}
+
+export type BrightnessSampler = (wx: number, wy: number, wz: number, shade: number) => BrightnessSample;
 
 // The six cube faces. Corner order + UVs are tuned so that triangles
 // (0,1,2, 2,1,3) produce correctly-wound front faces. Order matches the
@@ -153,7 +167,8 @@ function pushFace(
   y: number,
   z: number,
   tile: number,
-  brightness: number,
+  sample: BrightnessSample,
+  twoChannel: boolean,
   waterTop: boolean,
 ): void {
   const face = FACES[faceIndex];
@@ -161,6 +176,20 @@ function pushFace(
   const du = uv.u1 - uv.u0;
   const dv = uv.v1 - uv.v0;
   const base = b.vertexCount;
+  // Water pass keeps a single scalar brightness (its material is Standard). The
+  // opaque/cutout pass bakes two channels: r=shadedSun g=shadedBlock b=sunLevel
+  // a=blockLevel, consumed by the VoxelTerrainMaterial shader.
+  let cr: number, cg: number, cb: number, ca: number;
+  if (twoChannel) {
+    cr = sample.sunBright;
+    cg = sample.blockBright;
+    cb = sample.sunLevel;
+    ca = sample.blockLevel;
+  } else {
+    const m = sample.sunBright >= sample.blockBright ? sample.sunBright : sample.blockBright;
+    cr = cg = cb = m;
+    ca = 1;
+  }
   for (let c = 0; c < 4; c++) {
     const corner = face.corners[c];
     // Lower the entire water surface slightly so it reads as a fluid.
@@ -169,8 +198,7 @@ function pushFace(
     b.normals.push(face.normal[0], face.normal[1], face.normal[2]);
     const cu = CORNER_UV[c];
     b.uvs.push(uv.u0 + cu[0] * du, uv.v0 + cu[1] * dv);
-    // RGBA: Babylon vertex-color path expects 4 components per vertex.
-    b.colors.push(brightness, brightness, brightness, 1);
+    b.colors.push(cr, cg, cb, ca);
   }
   b.indices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
   b.vertexCount += 4;
@@ -178,12 +206,15 @@ function pushFace(
 
 // Two diagonal quads forming an "X" — the classic plantlike cross used for
 // grass tufts, flowers and mushrooms. Rendered in the cutout pass.
-function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: number, brightness: number): void {
+function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: number, sample: BrightnessSample): void {
   const uv = tileUV(tile);
   const du = uv.u1 - uv.u0;
   const dv = uv.v1 - uv.v0;
   const base = b.vertexCount;
-  const br = brightness;
+  const cr = sample.sunBright;
+  const cg = sample.blockBright;
+  const cb = sample.sunLevel;
+  const ca = sample.blockLevel;
   // Quad A: diagonal plane through (0,0,0)-(1,1,1). V is swapped vs. the
   // positions so that Y=0 (bottom) samples V=v1 (canvas-bottom of the tile
   // = the stem) and Y=1 (top) samples V=v0 (canvas-top = petals/leaves).
@@ -206,7 +237,7 @@ function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: numb
       b.positions.push(x + p[0], y + p[1], z + p[2]);
       b.normals.push(p[5], 0, p[6]);
       b.uvs.push(p[3], p[4]);
-      b.colors.push(br, br, br, 1);
+      b.colors.push(cr, cg, cb, ca);
     }
     b.indices.push(qbase, qbase + 1, qbase + 2, qbase + 2, qbase + 3, qbase);
     b.vertexCount += 4;
@@ -271,9 +302,11 @@ export function buildChunkGeometry(
           if (!shouldRenderFace(id, neighborId)) continue;
           // Face brightness comes from the light of the cell the face is
           // exposed to (the neighbour air/space), combined with face shade.
-          const br = sampleBrightness(nwx, nwy, nwz, FACE_BRIGHTNESS[f]);
+          const sample = sampleBrightness(nwx, nwy, nwz, FACE_BRIGHTNESS[f]);
           const isWaterTop = def.liquid && n[1] === 1;
-          pushFace(builder, f, wx, wy, wz, def.tiles[f], br, isWaterTop);
+          // Water keeps a single scalar brightness; opaque/cutout bake two
+          // light channels for the VoxelTerrainMaterial shader.
+          pushFace(builder, f, wx, wy, wz, def.tiles[f], sample, !def.liquid, isWaterTop);
         }
       }
     }

@@ -11,13 +11,13 @@ import {
 import { CHUNK_SIZE, CHUNK_HEIGHT, MAX_CHUNK_GEN_PER_FRAME, MAX_CHUNK_MESH_PER_FRAME } from "../constants";
 import type { BlockId } from "../types";
 import { Chunk } from "./Chunk";
-import { buildChunkGeometry, type BrightnessSampler } from "./ChunkMesher";
+import { buildChunkGeometry } from "./ChunkMesher";
 import { TerrainGenerator, findGroundY } from "./TerrainGenerator";
 import { VoxelLightEngine, lightKey } from "./lighting/VoxelLightEngine";
+import { VoxelTerrainMaterial } from "./lighting/VoxelTerrainMaterial";
 import {
   LIGHT_MAX,
   MAX_CHUNK_LIGHT_PER_FRAME,
-  combineLight,
   lightToBrightness,
   type LightDebugMode,
 } from "./lighting/LightingConfig";
@@ -39,8 +39,12 @@ interface ChunkMeshes {
  */
 export class World {
   readonly root: TransformNode;
-  readonly opaqueMaterial: StandardMaterial;
-  readonly cutoutMaterial: StandardMaterial;
+  /**
+   * Opaque + cutout terrain use a custom two-channel shader (sun channel ×
+   * dayFactor, block channel unaffected by night) so the day/night cycle never
+   * forces a chunk remesh. Water stays on a plain StandardMaterial.
+   */
+  readonly terrainMaterial: VoxelTerrainMaterial;
   readonly waterMaterial: StandardMaterial;
   readonly generator: TerrainGenerator;
   /** Atlas must have hasAlpha=true for the cutout pass to alpha-test. */
@@ -55,7 +59,7 @@ export class World {
   readonly lighting = new VoxelLightEngine((x, y, z) => this.getBlock(x, y, z));
   /** Chunks whose lighting must be recomputed before they (re)mesh. */
   private readonly lightDirty = new Set<string>();
-  /** Active light debug overlay (changes the mesh brightness sampler). */
+  /** Active light debug overlay (applied as a material uniform — no remesh). */
   private lightDebugMode: LightDebugMode = "off";
 
   constructor(seed: string, atlas: Texture, scene: Scene) {
@@ -64,35 +68,16 @@ export class World {
     this.generator = new TerrainGenerator(seed);
 
     // The atlas uses clearRect for plantlike tiles; we need alpha for cutout.
-    // Mark hasAlpha once so the cutout material can alpha-test against it.
     atlas.hasAlpha = true;
     this.atlasHasAlpha = true;
 
-    // Opaque pass: textured + vertex-coloured, no specular (Lambert-like).
-    // (Babylon applies vertex colors automatically when the mesh has a color
-    // vertex buffer, so no useVertexColor flag is needed.)
-    // Explicit MATERIAL_OPAQUE ensures the texture's alpha channel is ignored
-    // even though we set hasAlpha=true above (shared atlas).
-    this.opaqueMaterial = new StandardMaterial("voxel-opaque", scene);
-    this.opaqueMaterial.diffuseTexture = atlas;
-    this.opaqueMaterial.specularColor = new Color3(0, 0, 0);
-    this.opaqueMaterial.useAlphaFromDiffuseTexture = false;
-    this.opaqueMaterial.backFaceCulling = false;
-    this.opaqueMaterial.transparencyMode = Material.MATERIAL_OPAQUE;
-
-    // Cutout pass: plantlike decorations (alpha-tested, double-sided).
-    // MATERIAL_ALPHATEST hard-cuts fragments below alphaCutOff without
-    // blending — exactly the prior three.js alphaTest behaviour.
-    this.cutoutMaterial = new StandardMaterial("voxel-cutout", scene);
-    this.cutoutMaterial.diffuseTexture = atlas;
-    this.cutoutMaterial.specularColor = new Color3(0, 0, 0);
-    this.cutoutMaterial.useAlphaFromDiffuseTexture = true;
-    this.cutoutMaterial.alphaCutOff = 0.5;
-    this.cutoutMaterial.backFaceCulling = false;
-    this.cutoutMaterial.transparencyMode = Material.MATERIAL_ALPHATEST;
+    // Custom terrain shader for opaque + cutout passes. Both share one material
+    // instance: opaque tiles have alpha=1 (never discarded), plant tiles have
+    // alpha=0 backgrounds (discarded by the alpha test), so a single 0.5 cutoff
+    // handles both cube faces and the plantlike X-cross.
+    this.terrainMaterial = new VoxelTerrainMaterial(scene, { texture: atlas, alphaCutOff: 0.5 });
 
     // Transparent pass: water (alpha-blended, no depth write, double-sided).
-    // MATERIAL_ALPHABLEND uses material.alpha as a uniform opacity.
     this.waterMaterial = new StandardMaterial("voxel-water", scene);
     this.waterMaterial.diffuseTexture = atlas;
     this.waterMaterial.specularColor = new Color3(0, 0, 0);
@@ -101,6 +86,10 @@ export class World {
     this.waterMaterial.disableDepthWrite = true;
     this.waterMaterial.transparencyMode = Material.MATERIAL_ALPHABLEND;
   }
+
+  /** The opaque + cutout ShaderMaterial (shared). */
+  get opaqueMaterial(): Material { return this.terrainMaterial.material; }
+  get cutoutMaterial(): Material { return this.terrainMaterial.material; }
 
   private spiral(radius: number): Array<{ dx: number; dz: number; d: number }> {
     const cached = this.spiralCache.get(radius);
@@ -165,27 +154,23 @@ export class World {
   // --------------------------------------------------------- lighting ---
 
   /**
-   * Per-vertex brightness sampler handed to the mesher. Combines the sun + block
-   * light of the sampled cell with the face's directional shade. In a debug
-   * overlay mode it returns a raw channel value (grayscale) instead.
+   * Per-vertex light sample handed to the mesher. Bakes the sun + block light
+   * of the sampled cell (times the face shade and brightness curve) into two
+   * channels, plus the raw 0..1 levels for the debug overlay.
    *
-   * Sun light is baked at full day strength (sunFactor = 1); the day/night
-   * dimming is applied globally via Babylon light intensities so we never have
-   * to rebuild every mesh as the sun moves.
+   * Sun light is baked at FULL day strength here; the actual day/night dimming
+   * is applied later in the VoxelTerrainMaterial shader via the `uDayFactor`
+   * uniform — so the clock can sweep a whole day without rebuilding any mesh.
    */
-  private readonly sampleBrightness: BrightnessSampler = (wx, wy, wz, shade) => {
+  private readonly sampleBrightness = (wx: number, wy: number, wz: number, shade: number) => {
     const sun = this.lighting.getSun(wx, wy, wz);
     const block = this.lighting.getBlockLight(wx, wy, wz);
-    switch (this.lightDebugMode) {
-      case "sun":
-        return sun / LIGHT_MAX;
-      case "block":
-        return block / LIGHT_MAX;
-      case "combined":
-        return combineLight(sun, block, 1) / LIGHT_MAX;
-      default:
-        return shade * lightToBrightness(combineLight(sun, block, 1));
-    }
+    return {
+      sunBright: shade * lightToBrightness(sun),
+      blockBright: shade * lightToBrightness(block),
+      sunLevel: sun / LIGHT_MAX,
+      blockLevel: block / LIGHT_MAX,
+    };
   };
 
   /**
@@ -235,13 +220,19 @@ export class World {
     }
   }
 
-  /** Switch the light debug overlay; rebuilds meshes so the change is visible. */
+  /**
+   * Switch the light debug overlay. This is a shader uniform on the terrain
+   * material (the raw levels are already baked into vertex-colour .ba), so it
+   * toggles instantly with NO chunk remesh.
+   */
   setLightDebugMode(mode: LightDebugMode): void {
-    if (this.lightDebugMode === mode) return;
     this.lightDebugMode = mode;
-    for (const chunk of this.chunks.values()) {
-      if (chunk.generated) chunk.dirty = true;
-    }
+    const code = mode === "sun" ? 1 : mode === "block" ? 2 : mode === "combined" ? 3 : 0;
+    const tint =
+      mode === "sun" ? new Color3(1.0, 0.85, 0.4) :
+      mode === "block" ? new Color3(1.0, 0.7, 0.35) :
+      new Color3(1, 1, 1);
+    this.terrainMaterial.setDebugMode(code, tint);
   }
 
   getLightDebugMode(): LightDebugMode {
@@ -381,9 +372,9 @@ export class World {
       mesh.material = material;
       mesh.parent = this.root;
       mesh.isPickable = false;
-      // Opaque/cutout terrain receives Babylon shadow mapping; water does not
-      // (it's alpha-blended + depth-write-disabled, shadows would look wrong).
-      mesh.receiveShadows = slot !== "transparent";
+      // Terrain uses a custom shader (no Babylon shadow receiving); water is
+      // alpha-blended. Either way, nothing here receives Babylon shadow maps.
+      mesh.receiveShadows = false;
       vd.applyToMesh(mesh, false);
       entry[slot] = mesh;
     }
@@ -422,8 +413,7 @@ export class World {
   dispose(): void {
     for (const k of [...this.meshes.keys()]) this.disposeMeshes(k);
     this.chunks.clear();
-    this.opaqueMaterial.dispose();
-    this.cutoutMaterial.dispose();
+    this.terrainMaterial.dispose();
     this.waterMaterial.dispose();
     this.root.dispose();
   }

@@ -57,11 +57,53 @@ export function combineLight(
 
 // --- Day / night ---
 
-/** Length of a full day in real-world seconds (midday→midday). */
+/** Length of a full day in real-world seconds (midday→midday). ~10 min. */
 export const DAY_LENGTH_SECONDS = 600;
 /** timeOfDay in [0,1): 0 = midnight, 0.25 = sunrise, 0.5 = midday, 0.75 = sunset. */
-export const TIME_MIDDAY = 0.5;
 export const TIME_MIDNIGHT = 0;
+export const TIME_SUNRISE = 0.25;
+export const TIME_MIDDAY = 0.5;
+export const TIME_SUNSET = 0.75;
+
+/**
+ * Maximum moonlight contribution to the SUN channel at night (as a fraction of
+ * full sun brightness). Outdoor areas get at least `sun·moonFloor` so they are
+ * never pitch black; caves stay dark because their sun channel is ~0.
+ */
+export const MOON_FLOOR = 0.16;
+
+/** GLSL-style smoothstep clamped to [0,1]. */
+export function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Sun elevation (-1..1) for a time-of-day, where 1 = noon (overhead),
+ * 0 = sunrise/sunset (horizon), -1 = midnight (nadir). Derived from the sun's
+ * orbital angle so it matches the visual sun/moon positions exactly.
+ */
+export function sunElevationAt(timeOfDay: number): number {
+  const angle = (timeOfDay - TIME_SUNRISE) * Math.PI * 2;
+  return Math.sin(angle);
+}
+
+/**
+ * Daylight factor for the SUN channel (0 at night → 1 midday) with a smooth
+ * twilight band around sunrise/sunset. Used as a shader uniform so day/night
+ * can dim outdoor terrain WITHOUT rebuilding any chunk meshes.
+ */
+export function dayFactorAt(timeOfDay: number): number {
+  return smoothstep(-0.12, 0.18, sunElevationAt(timeOfDay));
+}
+
+/**
+ * Moonlight factor for the SUN channel (peaks at midnight, 0 by day). Provides
+ * a subtle outdoor floor at night.
+ */
+export function moonFactorAt(timeOfDay: number): number {
+  return smoothstep(-0.12, 0.18, -sunElevationAt(timeOfDay));
+}
 
 /**
  * Convert a time-of-day fraction to the brightness multiplier applied to the
@@ -70,9 +112,7 @@ export const TIME_MIDNIGHT = 0;
  * matches the visual sun position.
  */
 export function sunBrightnessAt(timeOfDay: number): number {
-  // Sun elevation angle: highest at midday (cos = 1), lowest at midnight (cos = -1).
-  const angle = (timeOfDay - TIME_MIDDAY) * Math.PI * 2;
-  const elev = Math.cos(angle); // -1..1
+  const elev = sunElevationAt(timeOfDay);
   if (elev <= 0) return 0.04; // below horizon → night floor
   // Smooth ramp so twilight isn't a hard cut.
   const day = Math.pow(elev, 0.6);
@@ -125,7 +165,12 @@ export interface ShadowConfig {
 }
 
 export const DEFAULT_SHADOW_CONFIG: ShadowConfig = {
-  enabled: true,
+  // Disabled by default: the terrain renders through the custom two-channel
+  // VoxelTerrainMaterial which does its own (voxel-sunlight) shadowing. The
+  // ShadowManager is retained for opt-in Babylon shadow maps (e.g. a future
+  // player mesh) but is off to keep day/night simple and free of the prior
+  // shadow-frustum rectangle artifact.
+  enabled: false,
   mapSize: 2048,
   // Frustum half-extent 80 (ortho 160). Caster radius 48 → ~32-block (2-chunk)
   // fade margin so caster shadows never touch the frustum edge.

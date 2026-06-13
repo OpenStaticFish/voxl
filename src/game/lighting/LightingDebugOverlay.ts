@@ -4,9 +4,14 @@ import { getBlock, resolveLight } from "../Blocks";
 export interface LightDebugInfo {
   enabled: boolean;
   timeOfDay: number;
+  timeScale: number;
   dayFactor: number;
+  moonFactor: number;
   sunIntensity: number;
   ambientIntensity: number;
+  sunDirection: { x: number; y: number; z: number };
+  sunVisible: number;
+  moonVisible: number;
   debugMode: string;
   shadowsEnabled: boolean;
   paused: boolean;
@@ -87,10 +92,13 @@ export class LightingDebugOverlay {
     if (!this.visible) return;
     const t = info.target;
     const fmt = (n: number) => (n >= 0 ? n.toFixed(2) : "—");
+    const sd = info.sunDirection;
     const lines: string[] = [
-      `time:   ${formatTime(info.timeOfDay)}${info.paused ? " (frozen)" : ""}  day=${fmt(info.dayFactor)}`,
-      `sun:    ${fmt(info.sunIntensity)}   ambient: ${fmt(info.ambientIntensity)}`,
-      `shadows:${info.shadowsEnabled ? " on" : " off"}   mode: ${info.debugMode}`,
+      `time:   ${formatTime(info.timeOfDay)}${info.paused ? " (frozen)" : ""}  ×${fmt(info.timeScale)}`,
+      `day=${fmt(info.dayFactor)}  moon=${fmt(info.moonFactor)}`,
+      `sunDir: (${sd.x.toFixed(2)},${sd.y.toFixed(2)},${sd.z.toFixed(2)})  vis s/m ${fmt(info.sunVisible)}/${fmt(info.moonVisible)}`,
+      `sun I=${fmt(info.sunIntensity)}  ambient=${fmt(info.ambientIntensity)}`,
+      `shadows:${info.shadowsEnabled ? " on" : " off"}   lightView: ${info.debugMode}`,
       `chunks: lit=${info.litCount}/${info.loadedCount}  relightQueue=${info.dirtyCount}`,
     ];
     if (t) {

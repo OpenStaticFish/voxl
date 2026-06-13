@@ -217,13 +217,7 @@ export class Game {
     // Re-seed the cloud field so it matches the new world.
     this.sky.setCloudSeed(seed);
     // Wire the lighting system into the new world + the sky's Babylon lights.
-    this.lighting = new LightingSystem(
-      this.world,
-      this.sky.sun,
-      this.sky.ambient,
-      this.sky.hemi,
-      this.scene,
-    );
+    this.lighting = new LightingSystem(this.world, this.sky, this.scene);
   }
 
   private setPlaying(): void {
@@ -285,10 +279,16 @@ export class Game {
       this.world?.update(this.player.position.x, this.player.position.z, this.settings.viewDistance);
     }
 
-    // Advance day/night + shadow follow even while paused (cheap, and lets you
-    // inspect frozen time). Skip when there's no world (main menu).
+    // Advance day/night + position sun/moon + push terrain uniforms even while
+    // paused (cheap; lets you inspect frozen time). Skip when no world.
     if (this.lighting && this.world) {
-      this.lighting.update(dt, this.player.position.x, this.player.position.y, this.player.position.z);
+      this.lighting.update(
+        dt,
+        this.player.camera.position,
+        this.player.position.x,
+        this.player.position.y,
+        this.player.position.z,
+      );
     }
 
     this.sky.update(dt, this.player.camera.position);
@@ -389,7 +389,8 @@ export class Game {
    *   K            cycle light visual mode (off → sun → block → combined)
    *   T            freeze / unfreeze the day-night clock
    *   H            toggle Babylon real-time shadows (voxel light stays on)
-   *   [  and  ]    scrub time backward / forward
+   *   [  and  ]    previous / next time preset (sunrise→noon→sunset→midnight)
+   *   O  and  I    speed up / slow down the day-night clock
    *   ;  and  '    snap to midnight / midday
    */
   private handleLightingDebugKey(code: string): void {
@@ -414,18 +415,30 @@ export class Game {
         this.hud.showToast(on ? "Shadows: on" : "Shadows: off (voxel light only)");
         break;
       }
-      case "BracketLeft":
-        dn.setTime(dn.timeOfDay - 0.02);
+      case "BracketLeft": {
+        const p = this.lighting.cyclePreset(false);
+        this.hud.showToast(`Time: ${p}`);
         break;
-      case "BracketRight":
-        dn.setTime(dn.timeOfDay + 0.02);
+      }
+      case "BracketRight": {
+        const p = this.lighting.cyclePreset(true);
+        this.hud.showToast(`Time: ${p}`);
+        break;
+      }
+      case "KeyO":
+        this.lighting.faster();
+        this.hud.showToast(`Time speed ×${dn.timeScale.toFixed(1)}`);
+        break;
+      case "KeyI":
+        this.lighting.slower();
+        this.hud.showToast(`Time speed ×${dn.timeScale.toFixed(1)}`);
         break;
       case "Semicolon":
-        dn.setTimeMidnight();
+        dn.setMidnight();
         this.hud.showToast("Time: midnight");
         break;
       case "Quote":
-        dn.setTimeMidday();
+        dn.setNoon();
         this.hud.showToast("Time: midday");
         break;
       default:
