@@ -137,6 +137,11 @@ export class DayNightCycle {
   setPaused(p: boolean): void { this.paused = p; }
   togglePaused(): boolean { this.paused = !this.paused; return this.paused; }
 
+  /** Current Babylon sun-light intensity (debug overlay). */
+  get sunIntensity(): number { return this.sun.intensity; }
+  /** Current Babylon ambient-light intensity (debug overlay). */
+  get ambientIntensity(): number { return this.ambient.intensity; }
+
   /** Multiply the clock speed (clamped to keep it sane). */
   scaleTime(factor: number): void {
     this.timeScale = Math.max(0, Math.min(64, this.timeScale * factor));

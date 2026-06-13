@@ -139,8 +139,8 @@ export class LightingSystem {
       timeScale: this.dayNight.timeScale,
       dayFactor: this.dayNight.dayFactor,
       moonFactor: this.dayNight.moonFactor,
-      sunIntensity: this.dayNight["sun"].intensity,
-      ambientIntensity: this.dayNight["ambient"].intensity,
+      sunIntensity: this.dayNight.sunIntensity,
+      ambientIntensity: this.dayNight.ambientIntensity,
       sunDirection: {
         x: this.dayNight.sunDirection.x,
         y: this.dayNight.sunDirection.y,

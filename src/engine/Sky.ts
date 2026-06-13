@@ -26,6 +26,9 @@ export class Sky {
   private readonly dome: Mesh;
   private readonly domeMat: ShaderMaterial;
   private readonly clouds: Clouds;
+  /** Scratch uniform vectors for the dome shader (avoid per-frame allocation). */
+  private readonly _zenVec = new Vector3();
+  private readonly _horVec = new Vector3();
 
   constructor(seed = "voxl", scene: Scene) {
     this.scene = scene;
@@ -113,8 +116,10 @@ export class Sky {
 
   /** Update the gradient dome colours from the day/night cycle. */
   setDomeColours(zenith: Color3, horizon: Color3): void {
-    this.domeMat.setVector3("topColor", new Vector3(zenith.r, zenith.g, zenith.b));
-    this.domeMat.setVector3("bottomColor", new Vector3(horizon.r, horizon.g, horizon.b));
+    this._zenVec.set(zenith.r, zenith.g, zenith.b);
+    this._horVec.set(horizon.r, horizon.g, horizon.b);
+    this.domeMat.setVector3("topColor", this._zenVec);
+    this.domeMat.setVector3("bottomColor", this._horVec);
   }
 
   setCloudsEnabled(enabled: boolean): void {

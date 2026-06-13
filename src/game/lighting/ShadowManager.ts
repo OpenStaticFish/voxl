@@ -180,9 +180,21 @@ export class ShadowManager {
   }
 }
 
+/**
+ * Membership-equal compare of two mesh lists without allocating (the caster
+ * list order isn't stable across frames, so this is an O(n²) membership check —
+ * fine for the ~tens of nearby casters). Avoids a per-frame Set allocation.
+ */
 function sameSet(a: Mesh[], b: Mesh[]): boolean {
-  if (a.length !== b.length) return false;
-  const bs = new Set(b);
-  for (const m of a) if (!bs.has(m)) return false;
+  const n = a.length;
+  if (n !== b.length) return false;
+  for (let i = 0; i < n; i++) {
+    const m = a[i];
+    let found = false;
+    for (let j = 0; j < n; j++) {
+      if (b[j] === m) { found = true; break; }
+    }
+    if (!found) return false;
+  }
   return true;
 }
