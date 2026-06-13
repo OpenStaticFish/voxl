@@ -1,4 +1,13 @@
-import * as THREE from "three";
+import {
+  Color3,
+  Material,
+  Mesh,
+  Scene,
+  StandardMaterial,
+  Texture,
+  TransformNode,
+  VertexData,
+} from "@babylonjs/core";
 import { CHUNK_SIZE, CHUNK_HEIGHT, MAX_CHUNK_GEN_PER_FRAME, MAX_CHUNK_MESH_PER_FRAME } from "../constants";
 import type { BlockId } from "../types";
 import { Chunk } from "./Chunk";
@@ -10,48 +19,72 @@ function key(cx: number, cz: number): string {
 }
 
 interface ChunkMeshes {
-  opaque?: THREE.Mesh;
-  cutout?: THREE.Mesh;
-  transparent?: THREE.Mesh;
+  opaque?: Mesh;
+  cutout?: Mesh;
+  transparent?: Mesh;
 }
 
 /**
  * Owns all chunks, their data, their meshes, and the streaming/meshing
- * pipeline. Materials are shared across chunks; geometries are owned per chunk
- * and disposed on unload/remesh to avoid GPU leaks.
+ * pipeline. Materials are shared across chunks; per-chunk meshes are created
+ * from the mesher's VertexData and disposed on unload/remesh.
  */
 export class World {
-  readonly group = new THREE.Group();
-  readonly opaqueMaterial: THREE.Material;
-  readonly cutoutMaterial: THREE.Material;
-  readonly waterMaterial: THREE.Material;
+  readonly root: TransformNode;
+  readonly opaqueMaterial: StandardMaterial;
+  readonly cutoutMaterial: StandardMaterial;
+  readonly waterMaterial: StandardMaterial;
   readonly generator: TerrainGenerator;
+  /** Atlas must have hasAlpha=true for the cutout pass to alpha-test. */
+  readonly atlasHasAlpha: boolean;
 
+  private readonly scene: Scene;
   private readonly chunks = new Map<string, Chunk>();
   private readonly meshes = new Map<string, ChunkMeshes>();
   private spiralCache = new Map<number, Array<{ dx: number; dz: number; d: number }>>();
 
-  constructor(seed: string, atlas: THREE.Texture) {
+  constructor(seed: string, atlas: Texture, scene: Scene) {
+    this.scene = scene;
+    this.root = new TransformNode("world-root", scene);
     this.generator = new TerrainGenerator(seed);
-    this.opaqueMaterial = new THREE.MeshLambertMaterial({
-      map: atlas,
-      vertexColors: true,
-    });
+
+    // The atlas uses clearRect for plantlike tiles; we need alpha for cutout.
+    // Mark hasAlpha once so the cutout material can alpha-test against it.
+    atlas.hasAlpha = true;
+    this.atlasHasAlpha = true;
+
+    // Opaque pass: textured + vertex-coloured, no specular (Lambert-like).
+    // (Babylon applies vertex colors automatically when the mesh has a color
+    // vertex buffer, so no useVertexColor flag is needed.)
+    // Explicit MATERIAL_OPAQUE ensures the texture's alpha channel is ignored
+    // even though we set hasAlpha=true above (shared atlas).
+    this.opaqueMaterial = new StandardMaterial("voxel-opaque", scene);
+    this.opaqueMaterial.diffuseTexture = atlas;
+    this.opaqueMaterial.specularColor = new Color3(0, 0, 0);
+    this.opaqueMaterial.useAlphaFromDiffuseTexture = false;
+    this.opaqueMaterial.backFaceCulling = false;
+    this.opaqueMaterial.transparencyMode = Material.MATERIAL_OPAQUE;
+
     // Cutout pass: plantlike decorations (alpha-tested, double-sided).
-    this.cutoutMaterial = new THREE.MeshLambertMaterial({
-      map: atlas,
-      vertexColors: true,
-      alphaTest: 0.5,
-      side: THREE.DoubleSide,
-    });
-    this.waterMaterial = new THREE.MeshLambertMaterial({
-      map: atlas,
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.72,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
+    // MATERIAL_ALPHATEST hard-cuts fragments below alphaCutOff without
+    // blending — exactly the prior three.js alphaTest behaviour.
+    this.cutoutMaterial = new StandardMaterial("voxel-cutout", scene);
+    this.cutoutMaterial.diffuseTexture = atlas;
+    this.cutoutMaterial.specularColor = new Color3(0, 0, 0);
+    this.cutoutMaterial.useAlphaFromDiffuseTexture = true;
+    this.cutoutMaterial.alphaCutOff = 0.5;
+    this.cutoutMaterial.backFaceCulling = false;
+    this.cutoutMaterial.transparencyMode = Material.MATERIAL_ALPHATEST;
+
+    // Transparent pass: water (alpha-blended, no depth write, double-sided).
+    // MATERIAL_ALPHABLEND uses material.alpha as a uniform opacity.
+    this.waterMaterial = new StandardMaterial("voxel-water", scene);
+    this.waterMaterial.diffuseTexture = atlas;
+    this.waterMaterial.specularColor = new Color3(0, 0, 0);
+    this.waterMaterial.alpha = 0.72;
+    this.waterMaterial.backFaceCulling = false;
+    this.waterMaterial.disableDepthWrite = true;
+    this.waterMaterial.transparencyMode = Material.MATERIAL_ALPHABLEND;
   }
 
   private spiral(radius: number): Array<{ dx: number; dz: number; d: number }> {
@@ -209,9 +242,9 @@ export class World {
   private applyMesh(
     k: string,
     slot: "opaque" | "cutout" | "transparent",
-    geo: THREE.BufferGeometry | null,
-    material: THREE.Material,
-    existing: ChunkMeshes | undefined,
+    vd: VertexData | null,
+    material: Material,
+    _existing: ChunkMeshes | undefined,
   ): void {
     let entry = this.meshes.get(k);
     if (!entry) {
@@ -220,14 +253,15 @@ export class World {
     }
     const prev = entry[slot];
     if (prev) {
-      this.group.remove(prev);
-      prev.geometry.dispose();
+      prev.dispose();
       entry[slot] = undefined;
     }
-    if (geo) {
-      const mesh = new THREE.Mesh(geo, material);
-      mesh.frustumCulled = true;
-      this.group.add(mesh);
+    if (vd) {
+      const mesh = new Mesh(`voxel-${slot}-${k}`, this.scene);
+      mesh.material = material;
+      mesh.parent = this.root;
+      mesh.isPickable = false;
+      vd.applyToMesh(mesh, false);
       entry[slot] = mesh;
     }
   }
@@ -237,10 +271,7 @@ export class World {
     if (!entry) return;
     for (const slot of ["opaque", "cutout", "transparent"] as const) {
       const m = entry[slot];
-      if (m) {
-        this.group.remove(m);
-        m.geometry.dispose();
-      }
+      if (m) m.dispose();
     }
     this.meshes.delete(k);
   }
@@ -256,5 +287,6 @@ export class World {
     this.opaqueMaterial.dispose();
     this.cutoutMaterial.dispose();
     this.waterMaterial.dispose();
+    this.root.dispose();
   }
 }

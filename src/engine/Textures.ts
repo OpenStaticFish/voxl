@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import { DynamicTexture, Scene, Texture } from "@babylonjs/core";
 
 // Procedurally generated texture atlas. All voxel textures are drawn to an
 // offscreen canvas at runtime — no copyrighted assets are imported. Tiles are
@@ -91,15 +91,39 @@ function paintGrassSide(ctx: CanvasRenderingContext2D, ox: number, oy: number, l
 }
 
 export interface AtlasResult {
-  texture: THREE.Texture;
+  texture: DynamicTexture;
 }
 
-/** Build the texture atlas canvas + upload it as a Three.js texture. */
-export function createTextureAtlas(): AtlasResult {
-  const canvas = document.createElement("canvas");
-  canvas.width = TILE_PX * ATLAS_COLS;
-  canvas.height = TILE_PX * ATLAS_ROWS;
-  const ctx = canvas.getContext("2d")!;
+/**
+ * Build the texture atlas as a Babylon DynamicTexture. The texture's canvas is
+ * filled in-place. We use **no mipmaps** with pure NEAREST sampling: with a
+ * tiny 128×128 / 8×8-tile atlas, auto-generated mip levels blend adjacent
+ * tiles together (atlas bleeding) and blur the pixel-art look. NEAREST-only
+ * stays crisp at every distance at the cost of some shimmering — the standard
+ * trade-off for voxel engines.
+ */
+export function createTextureAtlas(scene: Scene): AtlasResult {
+  const width = TILE_PX * ATLAS_COLS;
+  const height = TILE_PX * ATLAS_ROWS;
+  const texture = new DynamicTexture(
+    "atlas",
+    { width, height },
+    scene,
+    false, // generateMipMaps=false — see jsdoc above
+    Texture.NEAREST_NEAREST, // mag=NEAREST, min=NEAREST, no mip filter
+    undefined, // texture format (default RGBA)
+    false, // invertY=false → canvas top row maps to v=0 (matches the prior three.js flipY=false and the tileUV math)
+  );
+  texture.wrapU = Texture.CLAMP_ADDRESSMODE;
+  texture.wrapV = Texture.CLAMP_ADDRESSMODE;
+  texture.anisotropicFilteringLevel = 1; // no mipmaps → anisotropy is a no-op
+  // The atlas carries alpha (plantlike tiles clearRect their backgrounds); the
+  // cutout material uses this via useAlphaFromDiffuseTexture + alphaCutOff.
+  texture.hasAlpha = true;
+  // The DynamicTexture's getContext() returns the 2D context for the canvas
+  // it owns; flipY is configured so canvas row 0 (top) maps to v=0, matching
+  // the existing tileUV math (which is what the rest of the code expects).
+  const ctx = texture.getContext() as CanvasRenderingContext2D;
   ctx.imageSmoothingEnabled = false;
 
   const rand = rng(1337);
@@ -372,17 +396,8 @@ export function createTextureAtlas(): AtlasResult {
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestMipmapLinearFilter;
-  texture.generateMipmaps = true;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  // flipY=false keeps canvas row 0 (top) at v=0, making tile math simple.
-  texture.flipY = false;
-  texture.anisotropy = 4;
-  texture.needsUpdate = true;
+  // Upload the painted canvas to the GPU.
+  texture.update(false);
 
   return { texture };
 }

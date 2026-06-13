@@ -143,14 +143,18 @@ export class TerrainGenerator {
   /** Winding 3D tunnels + deep low-frequency caverns. */
   private isCave(wx: number, y: number, wz: number, h2: number): boolean {
     if (y < 2 || y > h2 + 2) return false;
+    // Keep a solid surface shell. The previous thresholds could carve caves up
+    // into the dressed terrain layer, exposing huge open cross-sections and
+    // leaving surface details visually floating above underground voids.
+    if (y > h2 - 10) return false;
     if (h2 <= SEA + 1) return false; // no caves beneath water (no flow sim)
     const n = this.noise;
     const a = n.noise3(wx * 0.045, y * 0.08, wz * 0.045);
     const b = n.noise3(wx * 0.045 + 100, y * 0.05 + 100, wz * 0.045 + 100);
-    if (Math.abs(a) < 0.1 && Math.abs(b) < 0.4) return true;
-    if (y < SEA - 6) {
+    if (Math.abs(a) < 0.055 && Math.abs(b) < 0.28) return true;
+    if (y < SEA - 10) {
       const c = n.fbm3(wx * 0.02 + 50, y * 0.03 + 50, wz * 0.02 + 50, 2);
-      if (c > 0.5) return true;
+      if (c > 0.58) return true;
     }
     return false;
   }

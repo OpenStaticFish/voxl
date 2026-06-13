@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import { Scene, UniversalCamera, Vector3 } from "@babylonjs/core";
 import {
   PLAYER_HALF_WIDTH,
   PLAYER_EYE_HEIGHT,
@@ -26,11 +26,15 @@ const EPS = 1e-4;
 /**
  * Player entity: owns the camera, handles mouse-look, walking/flying, gravity,
  * and swept AABB voxel collision. Also drives the block-selection raycast.
+ *
+ * The camera uses Babylon's right-handed system (scene.useRightHandedSystem =
+ * true), so the math is identical to the prior three.js implementation:
+ * camera looks down its local -Z, rotation order is YXZ.
  */
 export class Player {
-  readonly camera: THREE.PerspectiveCamera;
-  position = new THREE.Vector3(0.5, 40, 0.5);
-  velocity = new THREE.Vector3();
+  readonly camera: UniversalCamera;
+  position = new Vector3(0.5, 40, 0.5);
+  velocity = new Vector3();
   yaw = 0;
   pitch = 0;
   flying = false;
@@ -40,19 +44,26 @@ export class Player {
   /** Latest block targeted by the camera (for highlight + break/place). */
   target: RaycastHit | null = null;
 
-  constructor(aspect: number) {
-    this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
-    this.camera.rotation.order = "YXZ";
+  constructor(aspect: number, scene: Scene) {
+    void aspect; // Babylon derives aspect from the engine/canvas automatically.
+    // We don't attachControl — input is handled by our own Input class. The
+    // camera is just a transform + projection for rendering.
+    this.camera = new UniversalCamera("player", new Vector3(0.5, 40, 0.5), scene);
+    this.camera.fov = (75 * Math.PI) / 180; // radians in Babylon
+    this.camera.minZ = 0.1;
+    this.camera.maxZ = 1000;
+    // YXZ Euler order is the default for UniversalCamera; matches three.js.
+    // Don't let Babylon auto-handle keyboard/mouse — Input owns it.
+    this.camera.inputs.clear();
   }
 
-  setAspect(aspect: number): void {
-    this.camera.aspect = aspect;
-    this.camera.updateProjectionMatrix();
+  setAspect(_aspect: number): void {
+    // Babylon derives aspect from the engine's canvas size on resize, so this
+    // is a no-op (kept for API compatibility with Game.handleResize).
   }
 
   setFov(fov: number): void {
-    this.camera.fov = fov;
-    this.camera.updateProjectionMatrix();
+    this.camera.fov = (fov * Math.PI) / 180;
   }
 
   /** Place the player at a safe spawn above solid ground at (x,z). */
@@ -102,17 +113,17 @@ export class Player {
     // --- Wish direction (horizontal) ---
     const sinY = Math.sin(this.yaw);
     const cosY = Math.cos(this.yaw);
-    const fwd = new THREE.Vector3(-sinY, 0, -cosY);
-    const right = new THREE.Vector3(cosY, 0, -sinY);
+    const fwd = new Vector3(-sinY, 0, -cosY);
+    const right = new Vector3(cosY, 0, -sinY);
     let f = 0;
     let s = 0;
     if (input.isDown("KeyW")) f += 1;
     if (input.isDown("KeyS")) f -= 1;
     if (input.isDown("KeyD")) s += 1;
     if (input.isDown("KeyA")) s -= 1;
-    const wish = new THREE.Vector3();
-    wish.addScaledVector(fwd, f).addScaledVector(right, s);
-    if (wish.lengthSq() > 0) wish.normalize();
+    const wish = new Vector3(0, 0, 0);
+    wish.addInPlace(fwd.scale(f)).addInPlace(right.scale(s));
+    if (wish.lengthSquared() > 0) wish.normalize();
 
     const sprinting = input.isDown("ControlLeft") || input.isDown("ControlRight");
 
@@ -189,13 +200,23 @@ export class Player {
 
     // Sync camera to eye position + orientation.
     this.camera.position.set(pos.x, pos.y + PLAYER_EYE_HEIGHT, pos.z);
-    this.camera.rotation.y = this.yaw;
-    this.camera.rotation.x = this.pitch;
+    // Babylon's UniversalCamera uses (0,0,1) as its local forward, while the
+    // game's physics/raycast math assumes a three.js-style right-handed forward
+    // of (0,0,-1). With scene.useRightHandedSystem=true the projection is
+    // correct, but the camera reference isn't auto-flipped, so we compensate:
+    //   yaw_babylon  = yaw + π   → forward.yaw matches
+    //   pitch_babylon = -pitch   → looking up at +pitch matches
+    this.camera.rotation.y = this.yaw + Math.PI;
+    this.camera.rotation.x = -this.pitch;
 
     // --- Targeting raycast ---
-    const dir = new THREE.Vector3();
-    this.camera.getWorldDirection(dir);
-    this.target = raycastVoxel(world, this.camera.position.x, this.camera.position.y, this.camera.position.z, dir.x, dir.y, dir.z, REACH);
+    // Forward = Ry(yaw) * Rx(pitch) * (0, 0, -1) — same as three.js YXZ.
+    const cp = Math.cos(this.pitch);
+    const fx = -Math.sin(this.yaw) * cp;
+    const fy = Math.sin(this.pitch);
+    const fz = -Math.cos(this.yaw) * cp;
+    const eye = this.camera.position;
+    this.target = raycastVoxel(world, eye.x, eye.y, eye.z, fx, fy, fz, REACH);
   }
 
   /** The block the camera is currently looking at (for break/place). */

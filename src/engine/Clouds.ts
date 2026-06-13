@@ -1,4 +1,13 @@
-import * as THREE from "three";
+import {
+  Color3,
+  Mesh,
+  Scene,
+  ShaderMaterial,
+  SubMesh,
+  VertexData,
+  Vector2,
+  Vector3,
+} from "@babylonjs/core";
 import { Noise } from "./Noise";
 import {
   CLOUD_CELL,
@@ -20,7 +29,7 @@ import {
 // src/client/clouds.cpp, scaled to VOXL's world.
 
 /** Cool blue-grey tint used to shade cloud sides and bottoms. */
-const SHADOW = new THREE.Color("#6f8fb5");
+const SHADOW = Color3.FromHexString("#6f8fb5");
 
 /** Noise sample frequency per cell (lower = larger, chunkier cloud patches). */
 const CLOUD_FREQ = 0.22;
@@ -28,9 +37,11 @@ const CLOUD_FREQ = 0.22;
 const REBUILD_SLIDE = 0.5;
 
 export class Clouds {
-  readonly mesh: THREE.Mesh;
+  readonly mesh: Mesh;
 
   private noise: Noise;
+  private readonly scene: Scene;
+  private readonly material: ShaderMaterial;
 
   // The drift "origin" grows over time; clouds scroll as it moves.
   private originX = 0;
@@ -46,68 +57,72 @@ export class Clouds {
   private enabled = true;
 
   // Preallocated geometry buffers, reused across rebuilds (no per-build GC).
+  // RGBA colors (4 floats/vertex) — required by Babylon's vertex-color path.
   private readonly positions: Float32Array;
   private readonly colors: Float32Array;
-  private readonly geo: THREE.BufferGeometry;
+  private readonly indices: Uint32Array;
+  private maxVerts: number;
+  private maxFaces: number;
 
-  // Baked per-face shading colours.
-  private readonly cTop: THREE.Color;
-  private readonly cSide1: THREE.Color;
-  private readonly cSide2: THREE.Color;
-  private readonly cBottom: THREE.Color;
+  // Baked per-face shading colours (stored as [r,g,b,a] tuples for fast copy).
+  private readonly cTop: Color3;
+  private readonly cSide1: Color3;
+  private readonly cSide2: Color3;
+  private readonly cBottom: Color3;
 
-  constructor(seed: string) {
+  constructor(seed: string, scene: Scene) {
+    this.scene = scene;
     this.noise = new Noise(seed || "voxl");
 
-    this.cTop = new THREE.Color("#ffffff");
+    this.cTop = Color3.FromHexString("#ffffff");
     // side1 (N/S walls) and side2 (E/W walls) get progressively more shadow,
     // bottom gets full shadow — gives the slabs simple directional depth.
-    this.cSide1 = SHADOW.clone().multiplyScalar(0.25).addScalar(0.75);
-    this.cSide2 = SHADOW.clone().multiplyScalar(0.5).addScalar(0.5);
-    this.cBottom = SHADOW.clone();
+    this.cSide1 = SHADOW.scale(0.25).add(new Color3(0.75, 0.75, 0.75));
+    this.cSide2 = SHADOW.scale(0.5).add(new Color3(0.5, 0.5, 0.5));
+    this.cBottom = SHADOW.scale(0.28).add(new Color3(0.72, 0.72, 0.72));
 
     const cellsPerSide = CLOUD_RADIUS * 2;
-    const maxFaces = cellsPerSide * cellsPerSide * 6;
-    const maxVerts = maxFaces * 4;
-    this.positions = new Float32Array(maxVerts * 3);
-    this.colors = new Float32Array(maxVerts * 3);
-
-    this.geo = new THREE.BufferGeometry();
-    const posAttr = new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage);
-    const colAttr = new THREE.BufferAttribute(this.colors, 3).setUsage(THREE.DynamicDrawUsage);
-    this.geo.setAttribute("position", posAttr);
-    this.geo.setAttribute("color", colAttr);
-
+    this.maxFaces = cellsPerSide * cellsPerSide * 6;
+    this.maxVerts = this.maxFaces * 4;
+    this.positions = new Float32Array(this.maxVerts * 3);
+    this.colors = new Float32Array(this.maxVerts * 4);
     // Index pattern for any number of quads: [4k,4k+1,4k+2, 4k+2,4k+3,4k].
-    // Only drawRange changes per rebuild, so this is built once.
-    const indices = new Uint32Array(maxFaces * 6);
-    for (let k = 0; k < maxFaces; k++) {
+    // Only the SubMesh indexCount changes per rebuild, so this is built once.
+    this.indices = new Uint32Array(this.maxFaces * 6);
+    for (let k = 0; k < this.maxFaces; k++) {
       const o = k * 6;
       const v = k * 4;
-      indices[o] = v;
-      indices[o + 1] = v + 1;
-      indices[o + 2] = v + 2;
-      indices[o + 3] = v + 2;
-      indices[o + 4] = v + 3;
-      indices[o + 5] = v;
+      this.indices[o] = v;
+      this.indices[o + 1] = v + 1;
+      this.indices[o + 2] = v + 2;
+      this.indices[o + 3] = v + 2;
+      this.indices[o + 4] = v + 3;
+      this.indices[o + 5] = v;
     }
-    this.geo.setIndex(new THREE.BufferAttribute(indices, 1));
-    this.geo.setDrawRange(0, 0);
-    // Big enough to always be visible; the grid follows the camera.
-    this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, CLOUD_HEIGHT, 0), 1e9);
 
-    const mat = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      fog: true,
-      side: THREE.DoubleSide,
-    });
-    this.mesh = new THREE.Mesh(this.geo, mat);
-    this.mesh.frustumCulled = false;
+    // Build the mesh with full-size updatable buffers; we trim the drawn range
+    // via SubMesh each rebuild.
+    this.mesh = new Mesh("clouds", scene);
+    this.mesh.alwaysSelectAsActiveMesh = true; // never frustum-cull (follows camera)
+    this.mesh.applyFog = false;
+    this.mesh.isPickable = false;
+
+    const vd = new VertexData();
+    vd.positions = this.positions;
+    vd.colors = this.colors;
+    vd.indices = this.indices;
+    vd.applyToMesh(this.mesh, true); // true = updatable
+
+    this.material = makeCloudMaterial(scene);
+    this.mesh.material = this.material;
+
+    // Start with an empty draw range.
+    this.setDrawRange(0, 0);
   }
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    this.mesh.visible = enabled;
+    this.mesh.setEnabled(enabled);
   }
 
   setSeed(seed: string): void {
@@ -185,17 +200,19 @@ export class Clouds {
       bx: number, by: number, bz: number,
       c: number, cy: number, cz: number,
       dx: number, dy: number, dz: number,
-      color: THREE.Color,
+      color: Color3,
     ): void => {
       const o = v * 3;
       pos[o] = ax; pos[o + 1] = ay; pos[o + 2] = az;
       pos[o + 3] = bx; pos[o + 4] = by; pos[o + 5] = bz;
       pos[o + 6] = c; pos[o + 7] = cy; pos[o + 8] = cz;
       pos[o + 9] = dx; pos[o + 10] = dy; pos[o + 11] = dz;
+      const co = v * 4;
       for (let i = 0; i < 4; i++) {
-        col[o + i * 3] = color.r;
-        col[o + i * 3 + 1] = color.g;
-        col[o + i * 3 + 2] = color.b;
+        col[co + i * 4] = color.r;
+        col[co + i * 4 + 1] = color.g;
+        col[co + i * 4 + 2] = color.b;
+        col[co + i * 4 + 3] = 1;
       }
       v += 4;
     };
@@ -228,13 +245,80 @@ export class Clouds {
       }
     }
 
-    this.geo.setDrawRange(0, (v / 4) * 6);
-    (this.geo.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
-    (this.geo.getAttribute("color") as THREE.BufferAttribute).needsUpdate = true;
+    // Push updated vertices to the GPU and trim the drawn range to the active
+    // vertices. (We only update position+color; the index buffer is static.)
+    this.mesh.updateVerticesData("position", this.positions, false);
+    this.mesh.updateVerticesData("color", this.colors, false);
+    this.setDrawRange(v, (v / 4) * 6);
+  }
+
+  /** Set the SubMesh to draw `indexCount` indices (starting at 0). */
+  private setDrawRange(vertexCount: number, indexCount: number): void {
+    this.mesh.subMeshes.length = 0;
+    const drawVerts = Math.min(this.maxVerts, vertexCount);
+    // createBoundingBox=false avoids recomputing from garbage data past the range.
+    new SubMesh(0, 0, drawVerts, 0, indexCount, this.mesh, undefined, false);
+  }
+
+  /** Per-frame fog binding (called from Sky.update). */
+  bindFog(color: Color3, start: number, end: number, cameraPos: Vector3): void {
+    this.material.setColor3("fogColor", color);
+    this.material.setVector2("fogRange", new Vector2(start, end));
+    this.material.setVector3("cameraPos", cameraPos);
   }
 
   dispose(): void {
-    this.geo.dispose();
-    (this.mesh.material as THREE.Material).dispose();
+    this.material.dispose();
+    this.mesh.dispose();
   }
+}
+
+/**
+ * Unlit + vertex-coloured + fogged ShaderMaterial. Equivalent to three.js's
+ * MeshBasicMaterial({ vertexColors: true, fog: true, side: DoubleSide }).
+ * StandardMaterial can't reproduce this because disableLighting drops vertex
+ * colors, so we hand-roll a tiny shader.
+ */
+function makeCloudMaterial(scene: Scene): ShaderMaterial {
+  const material = new ShaderMaterial(
+    "clouds-mat",
+    scene,
+    {
+      vertexSource: /* glsl */ `
+        precision highp float;
+        attribute vec3 position;
+        attribute vec4 color;
+        uniform mat4 worldViewProjection;
+        uniform mat4 world;
+        varying vec4 vColor;
+        varying vec3 vPositionW;
+        void main() {
+          vec4 wp = world * vec4(position, 1.0);
+          vPositionW = wp.xyz;
+          gl_Position = worldViewProjection * vec4(position, 1.0);
+          vColor = color;
+        }
+      `,
+      fragmentSource: /* glsl */ `
+        precision highp float;
+        varying vec4 vColor;
+        varying vec3 vPositionW;
+        uniform vec3 fogColor;
+        uniform vec2 fogRange;
+        uniform vec3 cameraPos;
+        void main() {
+          float dist = length(vPositionW - cameraPos);
+          float fog = clamp((fogRange.y - dist) / (fogRange.y - fogRange.x), 0.0, 1.0);
+          vec3 col = mix(fogColor, vColor.rgb, fog);
+          gl_FragColor = vec4(col, vColor.a);
+        }
+      `,
+    },
+    {
+      attributes: ["position", "color"],
+      uniforms: ["world", "worldViewProjection", "fogColor", "fogRange", "cameraPos"],
+    },
+  );
+  material.backFaceCulling = false;
+  return material;
 }

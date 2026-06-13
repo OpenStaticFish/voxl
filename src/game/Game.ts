@@ -1,4 +1,13 @@
-import * as THREE from "three";
+import {
+  Color3,
+  Color4,
+  DynamicTexture,
+  LinesMesh,
+  MeshBuilder,
+  Scene,
+  StandardMaterial,
+  Vector3,
+} from "@babylonjs/core";
 import {
   PLAYER_HALF_WIDTH,
   PLAYER_HEIGHT,
@@ -19,17 +28,20 @@ import { loadSettings, saveSettings } from "../state/Settings";
 
 const SPAWN_PREGEN_RADIUS = 2;
 
+const SKY_COLOR_HEX = "#bfe3ff";
+
 /**
- * Top-level orchestrator. Owns the renderer, scene, world, player, input, and
- * UI; runs the fixed-pace game loop; and drives the menu/play/pause state
- * machine plus block editing, hotbar, settings, and screenshots.
+ * Top-level orchestrator. Owns the renderer (Babylon Engine), the scene, the
+ * world, player, input, and UI; runs the fixed-pace game loop; and drives the
+ * menu/play/pause state machine plus block editing, hotbar, settings, and
+ * screenshots.
  */
 export class Game {
   private state: GameState = "menu";
   private readonly renderer: Renderer;
-  private readonly scene = new THREE.Scene();
+  private readonly scene: Scene;
   private readonly sky: Sky;
-  private readonly atlas: THREE.Texture;
+  private readonly atlas: DynamicTexture;
   private world: World | null = null;
   private readonly player: Player;
   private readonly input: Input;
@@ -38,38 +50,48 @@ export class Game {
   private readonly menus: Menus;
   private settings: Settings;
 
-  private readonly highlight: THREE.LineSegments;
-  private readonly fog: THREE.Fog;
+  private readonly highlight: LinesMesh;
 
   private selectedIndex = 0;
   private last = performance.now();
   private fpsEma = 60;
   private hudTimer = 0;
-  private rafId = 0;
   private running = false;
 
   constructor(host: HTMLElement) {
     this.settings = loadSettings();
 
     this.renderer = new Renderer(host);
-    this.scene.background = new THREE.Color("#bfe3ff");
-    this.fog = new THREE.Fog(0xbfe3ff, 60, 220);
-    this.scene.fog = this.fog;
+    const scene = new Scene(this.renderer.engine);
+    // Right-handed coordinates — keeps the world-gen, physics, and raycast math
+    // identical to the prior three.js implementation (camera looks down -Z,
+    // +X right, +Y up).
+    scene.useRightHandedSystem = true;
 
-    this.atlas = createTextureAtlas().texture;
-    this.sky = new Sky(this.settings.seed);
-    this.scene.add(this.sky.group);
+    const sky = Color3.FromHexString(SKY_COLOR_HEX);
+    scene.clearColor = new Color4(sky.r, sky.g, sky.b, 1);
+    scene.ambientColor = new Color3(1, 1, 1);
+    // Fog is read live by the cloud ShaderMaterial via Sky.update().
+    scene.fogMode = Scene.FOGMODE_LINEAR;
+    scene.fogColor = sky.clone();
+    scene.fogStart = 60;
+    scene.fogEnd = 220;
 
-    this.player = new Player(window.innerWidth / window.innerHeight);
+    this.scene = scene;
+
+    this.atlas = createTextureAtlas(scene).texture;
+    this.sky = new Sky(this.settings.seed, scene);
+
+    this.player = new Player(window.innerWidth / window.innerHeight, scene);
     this.player.setFov(this.settings.fov);
+    scene.activeCamera = this.player.camera;
 
     this.input = new Input(this.renderer.canvas);
     this.screens = new ScreenManager();
     this.hud = new HUD();
     this.menus = new Menus(this.screens, this.settings);
 
-    this.highlight = this.makeHighlight();
-    this.scene.add(this.highlight);
+    this.highlight = makeHighlight(scene);
 
     this.sky.setCloudsEnabled(this.settings.clouds);
     this.hud.setFpsVisible(this.settings.showFps);
@@ -81,16 +103,6 @@ export class Game {
   }
 
   // ---------------------------------------------------------------- setup ---
-
-  private makeHighlight(): THREE.LineSegments {
-    const box = new THREE.BoxGeometry(1.002, 1.002, 1.002);
-    const edges = new THREE.EdgesGeometry(box);
-    const mat = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4 });
-    const lines = new THREE.LineSegments(edges, mat);
-    lines.visible = false;
-    lines.frustumCulled = false;
-    return lines;
-  }
 
   private bindCallbacks(): void {
     this.screens.onEnterPlaying = () => {
@@ -107,8 +119,9 @@ export class Game {
     this.menus.onRegenerate = (seed) => this.regenerate(seed);
 
     this.input.onPointerLockChange = (locked) => {
-      if (this.state === "playing" && !locked) this.pause();
-      else if (this.state === "paused" && locked) this.setPlaying();
+      // Don't auto-pause when the pointer leaves — only auto-resume if the
+      // user re-locks while already paused.
+      if (locked && this.state === "paused") this.setPlaying();
     };
     this.input.onNumberKey = (n) => this.selectSlot(n - 1);
     this.input.onScroll = (dir) => this.selectSlot(this.selectedIndex + dir);
@@ -116,6 +129,7 @@ export class Game {
       if (!down) return;
       if (code === "KeyP") void this.takeScreenshot();
       if (code === "KeyF") this.selectSlot(this.selectedIndex + 1);
+      if (code === "Escape" && this.state === "playing") this.pause();
     };
   }
 
@@ -144,9 +158,8 @@ export class Game {
     if (patch.clouds !== undefined) this.sky.setCloudsEnabled(patch.clouds);
     if (patch.showFps !== undefined) this.hud.setFpsVisible(patch.showFps);
     // viewDistance + mouseSensitivity are read live during the loop.
-    if (patch.viewDistance !== undefined && this.world) {
-      this.fog.far = this.settings.viewDistance * 16 * 1.7;
-      this.fog.near = this.fog.far * 0.35;
+    if (patch.viewDistance !== undefined) {
+      this.updateFog();
     }
     this.menus.updateCurrent(this.settings);
   }
@@ -190,11 +203,10 @@ export class Game {
 
   private createWorld(seed: string): void {
     if (this.world) {
-      this.scene.remove(this.world.group);
       this.world.dispose();
+      this.world = null;
     }
-    this.world = new World(seed, this.atlas);
-    this.scene.add(this.world.group);
+    this.world = new World(seed, this.atlas, this.scene);
     // Re-seed the cloud field so it matches the new world.
     this.sky.setCloudSeed(seed);
   }
@@ -241,11 +253,10 @@ export class Game {
     if (this.running) return;
     this.running = true;
     this.last = performance.now();
-    this.loop();
+    this.renderer.engine.runRenderLoop(this.tick);
   }
 
-  private loop = (): void => {
-    this.rafId = requestAnimationFrame(this.loop);
+  private tick = (): void => {
     const now = performance.now();
     let dt = (now - this.last) / 1000;
     this.last = now;
@@ -260,7 +271,7 @@ export class Game {
     }
 
     this.sky.update(dt, this.player.camera.position);
-    this.renderer.draw(this.scene, this.player.camera);
+    this.scene.render();
 
     this.updateFps(dt);
   };
@@ -272,10 +283,10 @@ export class Game {
     // Block highlight
     const target = this.player.getTarget();
     if (target) {
-      this.highlight.visible = true;
+      this.highlight.isVisible = true;
       this.highlight.position.set(target.x + 0.5, target.y + 0.5, target.z + 0.5);
     } else {
-      this.highlight.visible = false;
+      this.highlight.isVisible = false;
     }
 
     // Break / place
@@ -344,8 +355,8 @@ export class Game {
 
   private updateFog(): void {
     const far = this.settings.viewDistance * 16 * 1.7;
-    this.fog.far = far;
-    this.fog.near = far * 0.4;
+    this.scene.fogEnd = far;
+    this.scene.fogStart = far * 0.4;
   }
 
   private updateFps(dt: number): void {
@@ -359,7 +370,7 @@ export class Game {
 
   async takeScreenshot(): Promise<void> {
     // Ensure the canvas holds a freshly rendered frame.
-    this.renderer.draw(this.scene, this.player.camera);
+    this.scene.render();
     const name = this.state === "menu" || this.state === "loading" ? "main-menu.png" : "in-game.png";
     try {
       const saved = await captureScreenshot(this.renderer.canvas, name);
@@ -372,15 +383,15 @@ export class Game {
   // --------------------------------------------------------- dispose ---
 
   dispose(): void {
-    cancelAnimationFrame(this.rafId);
+    this.renderer.engine.stopRenderLoop();
     this.running = false;
     window.removeEventListener("resize", this.handleResize);
     this.input.dispose();
     this.world?.dispose();
     this.sky.dispose();
     this.atlas.dispose();
-    this.highlight.geometry.dispose();
-    (this.highlight.material as THREE.Material).dispose();
+    this.highlight.dispose();
+    this.scene.dispose();
     this.renderer.dispose();
   }
 
@@ -392,7 +403,7 @@ export class Game {
   }
 
   screenshotDataURL(filename = "in-game.png"): string {
-    this.renderer.draw(this.scene, this.player.camera);
+    this.scene.render();
     return this.renderer.canvas.toDataURL("image/png");
   }
 
@@ -403,4 +414,57 @@ export class Game {
   getGameState(): GameState {
     return this.state;
   }
+
+  /** TEMP debug: dump all chunk coords that are loaded. */
+  _loadedChunks(): unknown {
+    if (!this.world) return [];
+    const chunks = (this.world as any).chunks as Map<string, unknown>;
+    return [...chunks.keys()];
+  }
+
+  /** TEMP debug: replace all chunk materials with a flat unlit colour so the
+   *  world can be inspected without atlas/texture noise. Toggle via
+   *  `__voxl.debugFlat()` from the devtools console. */
+  _enableDebugFlat(): void {
+    if (!this.world) return;
+    const mat = new StandardMaterial("debug-flat", this.scene);
+    mat.diffuseColor = new Color3(1, 1, 1);
+    mat.emissiveColor = new Color3(0.6, 0.6, 0.6);
+    mat.specularColor = new Color3(0, 0, 0);
+    for (const m of (this.world as any).root.getChildMeshes() as any[]) {
+      m.material = mat;
+    }
+  }
+}
+
+/** Builds the wireframe block-selection outline as a LinesMesh with the 12
+ *  edges of a unit cube (matches the prior three.js BoxGeometry+EdgesGeometry). */
+function makeHighlight(scene: Scene): LinesMesh {
+  const s = 1.002 / 2; // half-extent
+  const v = (x: number, y: number, z: number) => new Vector3(x, y, z);
+  const edges: Vector3[][] = [
+    // bottom face
+    [v(-s, -s, -s), v(s, -s, -s)],
+    [v(s, -s, -s), v(s, -s, s)],
+    [v(s, -s, s), v(-s, -s, s)],
+    [v(-s, -s, s), v(-s, -s, -s)],
+    // top face
+    [v(-s, s, -s), v(s, s, -s)],
+    [v(s, s, -s), v(s, s, s)],
+    [v(s, s, s), v(-s, s, s)],
+    [v(-s, s, s), v(-s, s, -s)],
+    // verticals
+    [v(-s, -s, -s), v(-s, s, -s)],
+    [v(s, -s, -s), v(s, s, -s)],
+    [v(s, -s, s), v(s, s, s)],
+    [v(-s, -s, s), v(-s, s, s)],
+  ];
+  const lines = MeshBuilder.CreateLineSystem("highlight", { lines: edges, updatable: false }, scene);
+  lines.color = new Color3(0, 0, 0);
+  lines.alpha = 0.4;
+  lines.isVisible = false;
+  lines.isPickable = false;
+  lines.alwaysSelectAsActiveMesh = true;
+  lines.applyFog = false;
+  return lines;
 }

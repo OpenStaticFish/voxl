@@ -1,39 +1,45 @@
-import * as THREE from "three";
+import { Engine, Scene } from "@babylonjs/core";
 
 /**
- * Thin wrapper around THREE.WebGLRenderer that owns the canvas, handles DPI,
- * resize, and tone mapping. The canvas is appended to a provided host element.
+ * Thin wrapper around the Babylon.js Engine that owns the canvas and handles
+ * DPI/resize. The canvas is created and appended to a provided host element.
+ * The Scene is owned by Game; Renderer only draws it.
  */
 export class Renderer {
-  readonly renderer: THREE.WebGLRenderer;
+  readonly engine: Engine;
   readonly canvas: HTMLCanvasElement;
 
   constructor(host: HTMLElement) {
-    this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: "high-performance",
-      preserveDrawingBuffer: true, // needed for canvas.toDataURL screenshots
-    });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
-    this.canvas = this.renderer.domElement;
+    this.canvas = document.createElement("canvas");
     this.canvas.id = "game-canvas";
     host.appendChild(this.canvas);
+
+    this.engine = new Engine(
+      this.canvas,
+      true, // antialias
+      {
+        preserveDrawingBuffer: true, // needed for canvas.toDataURL screenshots
+        powerPreference: "high-performance",
+        stencil: true,
+      },
+      false, // adaptToDeviceRatio — we cap manually below
+    );
+    this.engine.setSize(window.innerWidth, window.innerHeight);
+    // Cap DPR at 2 (matches the previous three.js setPixelRatio behaviour).
+    // setHardwareScalingLevel(1/n) renders at n× resolution.
+    this.engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, 2));
   }
 
   setSize(w: number, h: number): void {
-    this.renderer.setSize(w, h);
+    this.engine.setSize(w, h);
   }
 
-  draw(scene: THREE.Scene, camera: THREE.Camera): void {
-    this.renderer.render(scene, camera);
+  draw(scene: Scene): void {
+    scene.render();
   }
 
   dispose(): void {
-    this.renderer.dispose();
+    this.engine.dispose();
     this.canvas.remove();
   }
 }

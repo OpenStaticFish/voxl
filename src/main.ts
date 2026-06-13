@@ -18,6 +18,9 @@ function boot(): void {
     getChunkCount: () => number;
     getGameState: () => string;
     takeScreenshot: () => Promise<void>;
+    // Debug hooks (not part of the gameplay API).
+    debugFlat?: () => void;
+    loadedChunks?: () => unknown;
   }
   (window as unknown as { __voxl?: VoxlAutomation }).__voxl = {
     beginPlay: () => game.beginPlay(),
@@ -25,6 +28,8 @@ function boot(): void {
     getChunkCount: () => game.getChunkCount(),
     getGameState: () => game.getGameState(),
     takeScreenshot: () => game.takeScreenshot(),
+    debugFlat: () => game._enableDebugFlat(),
+    loadedChunks: () => game._loadedChunks(),
   };
 }
 

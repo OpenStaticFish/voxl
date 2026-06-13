@@ -1,4 +1,4 @@
-import * as THREE from "three";
+import { VertexData } from "@babylonjs/core";
 import { CHUNK_SIZE, CHUNK_HEIGHT } from "../constants";
 import type { BlockId, FaceDef } from "../types";
 import { getBlock } from "./Blocks";
@@ -8,6 +8,13 @@ import type { Chunk } from "./Chunk";
 // The six cube faces. Corner order + UVs are tuned so that triangles
 // (0,1,2, 2,1,3) produce correctly-wound front faces. Order matches the
 // FACE index in Blocks.ts: [PX, NX, PY, NY, PZ, NZ].
+// The six cube faces. **Corner ordering convention**: for every face,
+// corners 0 and 2 sit at the **top** (high Y, or the face's "up" axis for
+// horizontal faces) and corners 1 and 3 sit at the **bottom**. This is what
+// lets a single CORNER_UV table put the tile's canvas-top row at the top of
+// every face. Triangles (0,1,2, 2,1,3) wound CCW from outside in the right-
+// handed system. Order matches the FACE index in Blocks.ts:
+// [PX, NX, PY, NY, PZ, NZ].
 const FACES: readonly FaceDef[] = [
   {
     // +X (right)
@@ -32,7 +39,9 @@ const FACES: readonly FaceDef[] = [
     ],
   },
   {
-    // +Y (top)
+    // +Y (top) — both face axes horizontal; corner order still follows the
+    // (top-left, bottom-left, top-right, bottom-right) convention so the
+    // single CORNER_UV table works without special-casing.
     normal: [0, 1, 0],
     neighbor: [0, 1, 0],
     corners: [
@@ -54,35 +63,44 @@ const FACES: readonly FaceDef[] = [
     ],
   },
   {
-    // +Z (front)
+    // +Z (front) — corners reordered so 0,2 are at high Y (top) and 1,3 are
+    // at low Y (bottom). This is critical: without it, U and V end up mapped
+    // to the wrong world axes (U to Y, V to X) and tile textures render
+    // rotated 90° on these faces.
     normal: [0, 0, 1],
     neighbor: [0, 0, 1],
     corners: [
-      [0, 0, 1],
-      [1, 0, 1],
       [0, 1, 1],
+      [0, 0, 1],
       [1, 1, 1],
+      [1, 0, 1],
     ],
   },
   {
-    // -Z (back)
+    // -Z (back) — same corner-ordering convention as +Z.
     normal: [0, 0, -1],
     neighbor: [0, 0, -1],
     corners: [
-      [1, 0, 0],
-      [0, 0, 0],
       [1, 1, 0],
+      [1, 0, 0],
       [0, 1, 0],
+      [0, 0, 0],
     ],
   },
 ];
 
 // Per-corner UV (in local 0..1 tile space). Corner index matches FACES order.
+// V is intentionally inverted vs. the "obvious" mapping: with invertY=false
+// on the atlas (which preserves the three.js flipY=false convention that the
+// tileUV math depends on), UV.y=0 samples the canvas TOP row of the tile. So
+// to put the canvas-top half of a tile (e.g. the grass strip on grass_side,
+// the petals on a flower) at the TOP of each cube face / plant cross, the
+// world-top corner must take V=0 and the world-bottom corner takes V=1.
 const CORNER_UV: readonly (readonly [number, number])[] = [
-  [0, 1],
   [0, 0],
-  [1, 1],
+  [0, 1],
   [1, 0],
+  [1, 1],
 ];
 
 // Baked directional brightness per face to fake directional lighting. This is
@@ -99,9 +117,9 @@ function shouldRenderFace(self: BlockId, neighbor: BlockId): boolean {
 }
 
 export interface MeshResult {
-  opaque: THREE.BufferGeometry | null;
-  cutout: THREE.BufferGeometry | null;
-  transparent: THREE.BufferGeometry | null;
+  opaque: VertexData | null;
+  cutout: VertexData | null;
+  transparent: VertexData | null;
 }
 
 interface BufferBuilder {
@@ -140,7 +158,8 @@ function pushFace(
     b.normals.push(face.normal[0], face.normal[1], face.normal[2]);
     const cu = CORNER_UV[c];
     b.uvs.push(uv.u0 + cu[0] * du, uv.v0 + cu[1] * dv);
-    b.colors.push(brightness, brightness, brightness);
+    // RGBA: Babylon vertex-color path expects 4 components per vertex.
+    b.colors.push(brightness, brightness, brightness, 1);
   }
   b.indices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
   b.vertexCount += 4;
@@ -155,19 +174,21 @@ function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: numb
   const dv = uv.v1 - uv.v0;
   const base = b.vertexCount;
   const br = CROSS_BRIGHTNESS;
-  // Quad A: diagonal plane through (0,0,0)-(1,1,1).
+  // Quad A: diagonal plane through (0,0,0)-(1,1,1). V is swapped vs. the
+  // positions so that Y=0 (bottom) samples V=v1 (canvas-bottom of the tile
+  // = the stem) and Y=1 (top) samples V=v0 (canvas-top = petals/leaves).
   const a: Array<[number, number, number, number, number, number, number]> = [
-    [0, 0, 0, uv.u0, uv.v0, -0.7071, 0.7071],
-    [1, 0, 1, uv.u1, uv.v0, -0.7071, 0.7071],
-    [1, 1, 1, uv.u1, uv.v1, -0.7071, 0.7071],
-    [0, 1, 0, uv.u0, uv.v1, -0.7071, 0.7071],
+    [0, 0, 0, uv.u0, uv.v1, -0.7071, 0.7071],
+    [1, 0, 1, uv.u1, uv.v1, -0.7071, 0.7071],
+    [1, 1, 1, uv.u1, uv.v0, -0.7071, 0.7071],
+    [0, 1, 0, uv.u0, uv.v0, -0.7071, 0.7071],
   ];
-  // Quad B: diagonal plane through (1,0,0)-(0,1,1).
+  // Quad B: diagonal plane through (1,0,0)-(0,1,1). Same V swap.
   const c: Array<[number, number, number, number, number, number, number]> = [
-    [1, 0, 0, uv.u0, uv.v0, 0.7071, 0.7071],
-    [0, 0, 1, uv.u1, uv.v0, 0.7071, 0.7071],
-    [0, 1, 1, uv.u1, uv.v1, 0.7071, 0.7071],
-    [1, 1, 0, uv.u0, uv.v1, 0.7071, 0.7071],
+    [1, 0, 0, uv.u0, uv.v1, 0.7071, 0.7071],
+    [0, 0, 1, uv.u1, uv.v1, 0.7071, 0.7071],
+    [0, 1, 1, uv.u1, uv.v0, 0.7071, 0.7071],
+    [1, 1, 0, uv.u0, uv.v0, 0.7071, 0.7071],
   ];
   for (const quad of [a, c]) {
     const qbase = b.vertexCount;
@@ -175,7 +196,7 @@ function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: numb
       b.positions.push(x + p[0], y + p[1], z + p[2]);
       b.normals.push(p[5], 0, p[6]);
       b.uvs.push(p[3], p[4]);
-      b.colors.push(br, br, br);
+      b.colors.push(br, br, br, 1);
     }
     b.indices.push(qbase, qbase + 1, qbase + 2, qbase + 2, qbase + 3, qbase);
     b.vertexCount += 4;
@@ -183,16 +204,15 @@ function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: numb
   void base;
 }
 
-function toGeometry(b: BufferBuilder): THREE.BufferGeometry | null {
+function toVertexData(b: BufferBuilder): VertexData | null {
   if (b.indices.length === 0) return null;
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(b.positions, 3));
-  geo.setAttribute("normal", new THREE.Float32BufferAttribute(b.normals, 3));
-  geo.setAttribute("uv", new THREE.Float32BufferAttribute(b.uvs, 2));
-  geo.setAttribute("color", new THREE.Float32BufferAttribute(b.colors, 3));
-  geo.setIndex(b.indices);
-  geo.computeBoundingSphere();
-  return geo;
+  const vd = new VertexData();
+  vd.positions = new Float32Array(b.positions);
+  vd.normals = new Float32Array(b.normals);
+  vd.uvs = new Float32Array(b.uvs);
+  vd.colors = new Float32Array(b.colors);
+  vd.indices = new Uint32Array(b.indices);
+  return vd;
 }
 
 /**
@@ -239,8 +259,8 @@ export function buildChunkGeometry(
   }
 
   return {
-    opaque: toGeometry(opaque),
-    cutout: toGeometry(cutout),
-    transparent: toGeometry(transparent),
+    opaque: toVertexData(opaque),
+    cutout: toVertexData(cutout),
+    transparent: toVertexData(transparent),
   };
 }
