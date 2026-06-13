@@ -504,7 +504,7 @@ export class Game {
         dbgWarn("target block " + id + " is not breakable");
         this.mining = null;
         this.breakOverlay.isVisible = false;
-        this.hud.showToast("Bedrock is unbreakable");
+        this.hud.showToast("Can't break this block");
         this.breakCooldown = 0.3;
         return;
       }

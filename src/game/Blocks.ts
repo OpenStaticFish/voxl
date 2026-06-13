@@ -365,6 +365,9 @@ export const BLOCKS: readonly BlockDef[] = [
 ];
 
 export const AIR_BLOCK = 0;
+export const WATER_BLOCK = 7;
+export const CACTUS_BLOCK = 19;
+export const MUSHROOM_BLOCK = 23;
 
 export function isAir(id: BlockId): boolean {
   return id === AIR_BLOCK;
@@ -373,6 +376,3 @@ export function isAir(id: BlockId): boolean {
 export function getBlock(id: BlockId): BlockDef {
   return BLOCKS[id] ?? AIR;
 }
-
-/** Blocks available in the hotbar (creative palette). */
-export const HOTBAR_BLOCKS: readonly BlockId[] = [1, 2, 3, 4, 5, 6, 7, 9, 19];

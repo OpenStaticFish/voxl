@@ -13,7 +13,7 @@ import {
   REACH,
 } from "../constants";
 import type { Settings } from "../types";
-import { getBlock } from "./Blocks";
+import { getBlock, WATER_BLOCK, CACTUS_BLOCK } from "./Blocks";
 import type { World } from "./World";
 import type { Input } from "../engine/Input";
 import { raycastVoxel } from "./BlockRaycaster";
@@ -111,7 +111,7 @@ export class Player {
       Math.floor(this.position.x),
       Math.floor(this.position.y + 0.5),
       Math.floor(this.position.z),
-    ) === 7;
+    ) === WATER_BLOCK;
   }
 
   update(dt: number, world: World, input: Input, settings: Settings): void {
@@ -264,7 +264,8 @@ export class Player {
   }
 
   private trackFall(y: number): void {
-    if (this.flying) {
+    if (this.flying || this.inWater) {
+      // Flight and water both cushion falls — don't track a fall distance.
       this.fallPeakY = null;
       this.wasOnGround = this.onGround;
       return;
@@ -288,7 +289,7 @@ export class Player {
       Math.floor(this.position.x),
       Math.floor(eyeY),
       Math.floor(this.position.z),
-    ) === 7;
+    ) === WATER_BLOCK;
   }
 
   /** Touching a cactus block anywhere in the player's AABB. */
@@ -305,7 +306,7 @@ export class Player {
     for (let x = minX; x <= maxX; x++) {
       for (let y = minY; y <= maxY; y++) {
         for (let z = minZ; z <= maxZ; z++) {
-          if (world.getBlock(x, y, z) === 19) return true;
+          if (world.getBlock(x, y, z) === CACTUS_BLOCK) return true;
         }
       }
     }

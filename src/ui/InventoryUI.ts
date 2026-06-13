@@ -109,6 +109,15 @@ export class InventoryUI {
       this.searchTerm = this.searchInput.value.toLowerCase().trim();
       this.renderPalette();
     });
+    // Escape closes the inventory even while the search field has focus (the
+    // global Input handler bails on keydowns originating from <input>s).
+    this.searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.onClose?.();
+      }
+    });
     this.paletteGrid = el("div", "inv-palette-grid");
     this.paletteWrap = palette;
     palette.append(this.searchInput, this.paletteGrid);

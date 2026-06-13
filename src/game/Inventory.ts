@@ -117,8 +117,9 @@ export class Inventory {
     this.clear();
     if (!data) return;
     for (const e of data) {
-      if (e.i >= 0 && e.i < this.slots.length && e.count > 0) {
-        this.slots[e.i] = { id: e.id, count: e.count };
+      if (e.i >= 0 && e.i < this.slots.length && e.count > 0 && getItem(e.id)) {
+        const max = stackMax(e.id);
+        this.slots[e.i] = { id: e.id, count: Math.min(e.count, max) };
       }
     }
   }

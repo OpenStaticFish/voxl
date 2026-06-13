@@ -12,7 +12,8 @@ const VERSION = "v1";
 export interface SaveData {
   inventory: SerializedSlot[];
   stats: SerializedStats;
-  mode: GameMode;
+  /** Optional — omitted/invalid values are ignored on load. */
+  mode?: GameMode;
 }
 
 function key(seed: string): string {
@@ -25,6 +26,11 @@ export function loadSave(seed: string): SaveData | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as SaveData;
     if (!parsed || !Array.isArray(parsed.inventory) || !parsed.stats) return null;
+    // Validate mode; an invalid/corrupt value is dropped so the caller falls
+    // back to the current global setting.
+    if (parsed.mode !== "survival" && parsed.mode !== "creative") {
+      parsed.mode = undefined;
+    }
     return parsed;
   } catch {
     return null;
