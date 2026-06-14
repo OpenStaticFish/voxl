@@ -13,6 +13,7 @@ import {
 import {
   PLAYER_HALF_WIDTH,
   PLAYER_HEIGHT,
+  SEA_LEVEL,
 } from "../constants";
 import type { GameState, Settings } from "../types";
 import { Renderer } from "../engine/Renderer";
@@ -46,6 +47,7 @@ import { GraphicsController, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, presetRen
 import { graphicsFromPreset, type GraphicsPreset, type GraphicsSettings } from "./graphics/GraphicsSettings";
 import { PerfOverlay, type PerfSnapshot } from "../ui/PerfOverlay";
 import { ChunkBorderOverlay } from "../ui/ChunkBorderOverlay";
+import { WorldgenOverlay, type WorldgenSnapshot, type WorldgenMapMode } from "../ui/WorldgenOverlay";
 import { UnderwaterRenderer } from "./UnderwaterRenderer";
 import { isLiquid, liquidDefOf, WATER_BLOCK, WATER_FLOWING_BLOCK } from "./Blocks";
 import { dbg, dbgWarn } from "../state/Debug";
@@ -87,6 +89,7 @@ export class Game {
   private readonly graphics: GraphicsController;
   private readonly perf: PerfOverlay;
   private readonly chunkBorders: ChunkBorderOverlay;
+  private readonly worldgenOverlay: WorldgenOverlay;
   private readonly underwater: UnderwaterRenderer;
 
   private selectedIndex = 0;
@@ -152,6 +155,7 @@ export class Game {
     this.graphics = new GraphicsController(this.renderer.engine, scene, this.sky, this.player.camera);
     this.perf = new PerfOverlay();
     this.chunkBorders = new ChunkBorderOverlay(scene);
+    this.worldgenOverlay = new WorldgenOverlay();
     this.underwater = new UnderwaterRenderer(scene);
     this.graphics.apply(this.settings.graphics);
 
@@ -208,6 +212,13 @@ export class Game {
       if (code === "KeyB") {
         const on = this.chunkBorders.toggle();
         this.hud.showToast(on ? "Chunk borders: on" : "Chunk borders: off");
+      }
+      if (code === "KeyG") {
+        const on = this.worldgenOverlay.toggle();
+        this.hud.showToast(on ? "Worldgen overlay: on" : "Worldgen overlay: off");
+      }
+      if (code === "KeyH" && this.worldgenOverlay.isOpen) {
+        this.worldgenOverlay.cycleMode();
       }
       if (code === "F4") {
         // Toggle liquid targeting (Luanti `liquids` pointability). Default
@@ -300,7 +311,8 @@ export class Game {
   private startGame(): void {
     this.setState("loading");
     this.createWorld(this.settings.seed);
-    this.player.spawn(this.world!, 0, 0);
+    const spawn = this.findSpawnColumn();
+    this.player.spawn(this.world!, spawn.x, spawn.z);
     this.spawnPoint = this.player.position.clone();
     const px = this.player.position.x;
     const pz = this.player.position.z;
@@ -326,7 +338,8 @@ export class Game {
     if (this.state === "playing" || this.state === "paused") {
       this.setState("loading");
       this.createWorld(seed);
-      this.player.spawn(this.world!, 0, 0);
+      const spawn = this.findSpawnColumn();
+      this.player.spawn(this.world!, spawn.x, spawn.z);
       this.spawnPoint = this.player.position.clone();
       for (let i = 0; i < 10; i++) this.world!.update(this.player.position.x, this.player.position.z, this.settings.viewDistance);
       this.updateFog();
@@ -353,6 +366,31 @@ export class Game {
     // Re-bind the graphics controller to the new world so material/shadow/cloud
     // settings apply to it (the controller re-applies the full config).
     this.graphics.attachWorld(this.world, this.lighting);
+  }
+
+  /**
+   * Find a dry-land column near the origin to spawn the player on, searching an
+   * expanding square spiral. Avoids spawning on the ocean floor when the seed
+   * places deep water at (0,0). Falls back to the origin if none is found.
+   */
+  private findSpawnColumn(): { x: number; z: number } {
+    const gen = this.world!.generator;
+    const check = (x: number, z: number): boolean => {
+      const h = gen.columnHeight(x, z);
+      return h > SEA_LEVEL && gen.biomeAt(x, z, h) !== "ocean";
+    };
+    if (check(0, 0)) return { x: 0, z: 0 };
+    for (let r = 6; r <= 384; r += 6) {
+      for (let x = -r; x <= r; x += 6) {
+        if (check(x, -r)) return { x, z: -r };
+        if (check(x, r)) return { x, z: r };
+      }
+      for (let z = -r + 6; z <= r - 6; z += 6) {
+        if (check(-r, z)) return { x: -r, z };
+        if (check(r, z)) return { x: r, z };
+      }
+    }
+    return { x: 0, z: 0 };
   }
 
   /** Load inventory+vitals for this seed, or seed a fresh starter kit. */
@@ -611,6 +649,11 @@ export class Game {
           target ? { x: target.x, y: target.y, z: target.z, block: target.block } : null,
         );
         this.lighting.overlay.update(info);
+      }
+      // World-gen debug overlay (throttled). The minimap re-renders on player
+      // movement, so this is cheap between moves.
+      if (this.worldgenOverlay.isOpen) {
+        this.worldgenOverlay.update(this.buildWorldgenSnapshot(target));
       }
     }
 
@@ -912,6 +955,24 @@ export class Game {
     this.perf.update(this.buildPerfSnapshot());
   }
 
+  /** Snapshot for the world-gen overlay: targeted column + rolling gen stats. */
+  private buildWorldgenSnapshot(
+    target: ReturnType<Player["getTarget"]>,
+  ): WorldgenSnapshot {
+    const p = this.player.position;
+    const tx = target ? Math.floor(target.x) : Math.floor(p.x);
+    const tz = target ? Math.floor(target.z) : Math.floor(p.z);
+    return {
+      generator: this.world?.generator ?? null,
+      stats: this.world?.generator.statsSnapshot() ?? null,
+      playerX: p.x,
+      playerZ: p.z,
+      targetWX: tx,
+      targetWZ: tz,
+      seaLevel: SEA_LEVEL,
+    };
+  }
+
   private buildPerfSnapshot(): PerfSnapshot {
     const scene = this.scene;
     const active = scene.getActiveMeshes();
@@ -942,6 +1003,11 @@ export class Game {
         }
       }
     }
+    const genStats = this.world?.generator.statsSnapshot() ?? null;
+    const ppos = this.player.position;
+    const biomeAtPlayer = this.world?.generator
+      ? this.world.generator.biomeAt(Math.floor(ppos.x), Math.floor(ppos.z), Math.floor(ppos.y))
+      : "—";
     return {
       fps: this.fpsEma,
       frameMs: this.frameMsEma,
@@ -993,6 +1059,10 @@ export class Game {
         : null,
       waterSidesOn: this.world?.waterSidesOn ?? true,
       waterAnimOn: this.world?.waterShader.animationOn ?? true,
+      genAvgMs: genStats?.avgMs ?? 0,
+      genLastMs: genStats?.lastMs ?? 0,
+      genChunks: genStats?.chunks ?? 0,
+      biome: biomeAtPlayer,
     };
   }
 
@@ -1177,6 +1247,30 @@ export class Game {
   /** Toggle the chunk-border debug overlay from the console. */
   _toggleChunkBorders(on?: boolean): void {
     this.chunkBorders.setVisible(on ?? !this.chunkBorders.isOpen);
+  }
+
+  /** Toggle the world-gen debug overlay from the console (`__voxl.worldgen()`). */
+  _toggleWorldgen(on?: boolean): void {
+    this.worldgenOverlay.setVisible(on ?? !this.worldgenOverlay.isOpen);
+  }
+
+  /** Set the world-gen minimap mode from the console (`__voxl.worldgenMode()`). */
+  _worldgenMode(mode: WorldgenMapMode): void {
+    this.worldgenOverlay.setVisible(true);
+    this.worldgenOverlay.setMode(mode);
+  }
+
+  /** Dump world-gen stats + the biome at the player to the console. */
+  _worldgenInfo(): void {
+    const gen = this.world?.generator;
+    if (!gen) {
+      console.log("[voxl] no world");
+      return;
+    }
+    const p = this.player.position;
+    const d = gen.debugAt(Math.floor(p.x), Math.floor(p.z));
+    console.log("[voxl] worldgen @", Math.floor(p.x), Math.floor(p.z), d);
+    console.log("[voxl] stats", gen.statsSnapshot());
   }
 
   // ---- Per-layer isolation toggles (for diagnosing patches/artifacts) ----
