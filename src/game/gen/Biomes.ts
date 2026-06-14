@@ -339,8 +339,14 @@ export function landBlend(heat: number, humidity: number): { second: BiomeId; ed
       second = id;
     }
   }
-  // edge ≈ 1 when the two nearest biomes are nearly equidistant.
-  const edge = bestD < 1e-6 ? 1 : Math.max(0, 1 - Math.sqrt(secondD) / (Math.sqrt(bestD) + 0.001));
+  // edge ∈ [0,1]: 0 deep inside a biome (nearest much closer than second),
+  // 1 on a boundary (the two nearest equidistant). Uses a fixed-width band so
+  // the blend zone is well-defined regardless of biome spacing.
+  const dBest = Math.sqrt(bestD);
+  const dSecond = Math.sqrt(secondD);
+  const BLEND_BAND = 0.05;
+  const gap = dSecond - dBest;
+  const edge = gap < BLEND_BAND ? 1 - gap / BLEND_BAND : 0;
   return { second, edge: edge < 0 ? 0 : edge > 1 ? 1 : edge };
 }
 

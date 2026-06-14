@@ -219,6 +219,7 @@ export class Game {
       }
       if (code === "KeyH" && this.worldgenOverlay.isOpen) {
         this.worldgenOverlay.cycleMode();
+        return; // don't fall through to the lighting-debug key handler
       }
       if (code === "F4") {
         // Toggle liquid targeting (Luanti `liquids` pointability). Default
@@ -375,10 +376,9 @@ export class Game {
    */
   private findSpawnColumn(): { x: number; z: number } {
     const gen = this.world!.generator;
-    const check = (x: number, z: number): boolean => {
-      const h = gen.columnHeight(x, z);
-      return h > SEA_LEVEL && gen.biomeAt(x, z, h) !== "ocean";
-    };
+    // Dry land is purely height-based (selectBiome returns "ocean" iff height ≤
+    // sea), so a single columnHeight() check suffices — no climate/biome eval.
+    const check = (x: number, z: number): boolean => gen.columnHeight(x, z) > SEA_LEVEL;
     if (check(0, 0)) return { x: 0, z: 0 };
     // Step 8 keeps the worst-case (ocean-start) spiral cheap while still landing
     // on land within a few blocks of the ideal spot.
