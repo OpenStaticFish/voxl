@@ -35,6 +35,10 @@ interface ChunkMeshes {
   opaque?: Mesh;
   cutout?: Mesh;
   transparent?: Mesh;
+  /** Numeric chunk coords cached at creation so hot loops (foliage cull, shadow
+   *  caster list) don't re-parse the map key every frame. */
+  cx: number;
+  cz: number;
 }
 
 /**
@@ -467,17 +471,15 @@ export class World {
     // Foliage (cutout) render-distance cull: hide plantlike meshes beyond the
     // configured distance so grass/flowers don't cost fill rate at range. This
     // is a draw-time decision only — chunks stay fully generated/deterministic.
+    // Reads the numeric coords cached on ChunkMeshes (no per-frame key parsing).
     const cutDist = this.foliageCutoutDistance;
     if (cutDist !== Infinity) {
       const cutSq = cutDist * cutDist;
-      for (const [mk, entry] of this.meshes) {
+      for (const entry of this.meshes.values()) {
         const m = entry.cutout;
         if (!m) continue;
-        const comma = mk.indexOf(",");
-        const cx = parseInt(mk.slice(0, comma), 10);
-        const cz = parseInt(mk.slice(comma + 1), 10);
-        const dx = cx * 16 + 8 - playerX;
-        const dz = cz * 16 + 8 - playerZ;
+        const dx = entry.cx * 16 + 8 - playerX;
+        const dz = entry.cz * 16 + 8 - playerZ;
         m.setEnabled(dx * dx + dz * dz <= cutSq);
       }
     } else {
@@ -512,17 +514,19 @@ export class World {
     if (result.transparent) result.transparent.colors = null;
 
     // Opaque
-    this.applyMesh(k, "opaque", result.opaque, this.opaqueMaterial, existing);
+    this.applyMesh(k, chunk.cx, chunk.cz, "opaque", result.opaque, this.opaqueMaterial, existing);
     // Cutout (plantlike decorations)
-    this.applyMesh(k, "cutout", result.cutout, this.cutoutMaterial, existing);
+    this.applyMesh(k, chunk.cx, chunk.cz, "cutout", result.cutout, this.cutoutMaterial, existing);
     // Transparent (water)
-    this.applyMesh(k, "transparent", result.transparent, this.waterMaterial, existing);
+    this.applyMesh(k, chunk.cx, chunk.cz, "transparent", result.transparent, this.waterMaterial, existing);
 
     chunk.dirty = false;
   }
 
   private applyMesh(
     k: string,
+    cx: number,
+    cz: number,
     slot: "opaque" | "cutout" | "transparent",
     vd: VertexData | null,
     material: Material,
@@ -530,7 +534,7 @@ export class World {
   ): void {
     let entry = this.meshes.get(k);
     if (!entry) {
-      entry = {};
+      entry = { cx, cz };
       this.meshes.set(k, entry);
     }
     const prev = entry[slot];
@@ -570,13 +574,10 @@ export class World {
    * manager to keep the shadow render list limited to nearby casters.
    */
   forEachOpaqueMesh(cb: (cx: number, cz: number, mesh: Mesh) => void): void {
-    for (const [k, entry] of this.meshes) {
+    for (const entry of this.meshes.values()) {
       const m = entry.opaque;
       if (!m) continue;
-      const comma = k.indexOf(",");
-      const cx = parseInt(k.slice(0, comma), 10);
-      const cz = parseInt(k.slice(comma + 1), 10);
-      cb(cx, cz, m);
+      cb(entry.cx, entry.cz, m);
     }
   }
 

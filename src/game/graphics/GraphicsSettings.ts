@@ -144,7 +144,7 @@ export function migrateGraphics(parsed: Partial<GraphicsSettings> | undefined): 
   return {
     preset: parsed.preset ?? base.preset,
     renderScale: clamp(parsed.renderScale ?? base.renderScale, 0.5, 1),
-    dprCap: clamp(parsed.dprCap ?? base.dprCap, 1, 3),
+    dprCap: clamp(parsed.dprCap ?? base.dprCap, 1.5, 2),
     antiAliasing: parsed.antiAliasing ?? base.antiAliasing,
     shadows: parsed.shadows ?? base.shadows,
     water: parsed.water ?? base.water,

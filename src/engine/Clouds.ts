@@ -54,6 +54,9 @@ export class Clouds {
   private lastCenterX = Infinity;
   private lastCenterZ = Infinity;
 
+  /** Scratch fog-range vector, reused each frame to avoid a per-frame allocation. */
+  private readonly _fogRange = new Vector2(0, 0);
+
   private enabled = true;
   /**
    * "Simple" tier skips the cloud TOP faces — the player is almost always below
@@ -282,7 +285,8 @@ export class Clouds {
   /** Per-frame fog binding (called from Sky.update). */
   bindFog(color: Color3, start: number, end: number, cameraPos: Vector3): void {
     this.material.setColor3("fogColor", color);
-    this.material.setVector2("fogRange", new Vector2(start, end));
+    this._fogRange.set(start, end);
+    this.material.setVector2("fogRange", this._fogRange);
     this.material.setVector3("cameraPos", cameraPos);
   }
 
