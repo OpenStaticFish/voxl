@@ -23,6 +23,7 @@ function boot(): void {
     loadedChunks?: () => unknown;
     // Lighting debug surface (see LightingSystem).
     lighting?: () => unknown;
+    debugInfo?: () => Record<string, unknown>;
   }
   (window as unknown as { __voxl?: VoxlAutomation }).__voxl = {
     beginPlay: () => game.beginPlay(),
@@ -33,6 +34,7 @@ function boot(): void {
     debugFlat: () => game._enableDebugFlat(),
     loadedChunks: () => game._loadedChunks(),
     lighting: () => game._lightingDebug(),
+    debugInfo: () => game._debugInfo(),
   };
 }
 

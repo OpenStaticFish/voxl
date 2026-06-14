@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   clouds: true,
   seed: DEFAULT_SEED,
+  mode: "creative",
 };
 
 export function loadSettings(): Settings {
@@ -17,7 +18,11 @@ export function loadSettings(): Settings {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<Settings>;
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    const mode =
+      parsed.mode === "survival" || parsed.mode === "creative"
+        ? parsed.mode
+        : DEFAULT_SETTINGS.mode;
+    return { ...DEFAULT_SETTINGS, ...parsed, mode };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
