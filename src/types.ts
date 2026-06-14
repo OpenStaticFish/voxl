@@ -59,6 +59,19 @@ export type {
   GraphicsSettings,
 };
 
+/** A liquid cell the ray passed through (for targeting/debug), with the empty
+ *  cell just before it (for placement against terrain through water). */
+export interface LiquidPassHit {
+  x: number;
+  y: number;
+  z: number;
+  px: number;
+  py: number;
+  pz: number;
+  block: BlockId;
+  distance: number;
+}
+
 /** Result of a voxel DDA raycast. */
 export interface RaycastHit {
   /** Integer coords of the hit block. */
@@ -73,4 +86,9 @@ export interface RaycastHit {
   block: BlockId;
   /** Distance from ray origin. */
   distance: number;
+  /** True if the ray crossed at least one liquid cell before this hit. */
+  passedThroughLiquid: boolean;
+  /** The first liquid cell the ray passed through (when ignoring liquids),
+   *  so a "liquid targeting" mode can select it without a second raycast. */
+  firstLiquid?: LiquidPassHit;
 }

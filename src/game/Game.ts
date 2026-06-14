@@ -46,6 +46,8 @@ import { GraphicsController, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, presetRen
 import { graphicsFromPreset, type GraphicsPreset, type GraphicsSettings } from "./graphics/GraphicsSettings";
 import { PerfOverlay, type PerfSnapshot } from "../ui/PerfOverlay";
 import { ChunkBorderOverlay } from "../ui/ChunkBorderOverlay";
+import { UnderwaterRenderer } from "./UnderwaterRenderer";
+import { isLiquid, liquidDefOf, WATER_BLOCK, WATER_FLOWING_BLOCK } from "./Blocks";
 import { dbg, dbgWarn } from "../state/Debug";
 
 const SPAWN_PREGEN_RADIUS = 2;
@@ -85,6 +87,7 @@ export class Game {
   private readonly graphics: GraphicsController;
   private readonly perf: PerfOverlay;
   private readonly chunkBorders: ChunkBorderOverlay;
+  private readonly underwater: UnderwaterRenderer;
 
   private selectedIndex = 0;
   private last = performance.now();
@@ -149,6 +152,7 @@ export class Game {
     this.graphics = new GraphicsController(this.renderer.engine, scene, this.sky, this.player.camera);
     this.perf = new PerfOverlay();
     this.chunkBorders = new ChunkBorderOverlay(scene);
+    this.underwater = new UnderwaterRenderer(scene);
     this.graphics.apply(this.settings.graphics);
 
     this.highlight = makeHighlight(scene);
@@ -204,6 +208,13 @@ export class Game {
       if (code === "KeyB") {
         const on = this.chunkBorders.toggle();
         this.hud.showToast(on ? "Chunk borders: on" : "Chunk borders: off");
+      }
+      if (code === "F4") {
+        // Toggle liquid targeting (Luanti `liquids` pointability). Default
+        // (off) = mine/build through water; on = point at the water surface to
+        // remove/place water sources.
+        const on = this.player.toggleTargetLiquids();
+        this.hud.showToast(on ? "Targeting: liquids (water)" : "Targeting: solids through water");
       }
       if (code === "KeyE" && (this.state === "playing" || this.inventoryOpen)) this.toggleInventory();
       if (code === "Escape") {
@@ -477,6 +488,18 @@ export class Game {
         this.player.position.y,
         this.player.position.z,
       );
+      // Animate the water surface (subtle shimmer; no-op on Low).
+      this.world.waterShader.animate(dt);
+    }
+    // Underwater tint + fog override. Runs every frame (even with no world) so
+    // the overlay reliably fades out on quit-to-menu; when submerged it pulls
+    // the fog in for the camera and restores it automatically when surfaced.
+    {
+      const eyeLiquidId = this.world ? this.player.liquidAtEye(this.world) : 0;
+      const eyeLiquid = eyeLiquidId ? liquidDefOf(eyeLiquidId) : null;
+      const submerged = this.world ? this.player.headSubmerged(this.world) : false;
+      const dayFactor = this.lighting?.dayNight.dayFactor ?? 1;
+      this.underwater.update(dt, submerged, eyeLiquid, dayFactor);
     }
 
     this.sky.update(dt, this.player.camera.position);
@@ -671,10 +694,26 @@ export class Game {
   private breakBlock(x: number, y: number, z: number): void {
     const world = this.world!;
     const id = world.getBlock(x, y, z);
-    dbg("breakBlock", JSON.stringify({ x, y, z, id, breakable: isBreakable(id) }));
+    dbg("breakBlock", JSON.stringify({ x, y, z, id, breakable: isBreakable(id), liquid: isLiquid(id) }));
+    // Liquid-mode removal: the raycast only returns a liquid as the target
+    // when liquid targeting is on, OR as the fallback when no solid is in
+    // reach. Only honour removal in liquid mode; otherwise hint the player.
+    if (isLiquid(id)) {
+      if (!this.player.targetLiquids) {
+        this.hud.showToast("Switch to liquid targeting (F4) to remove water");
+        return;
+      }
+      if (world.setLiquid(x, y, z, 0, 0)) {
+        world.queueLiquidUpdate(x, y, z);
+        this.hud.showToast(`Removed ${getBlock(id).name}`);
+      }
+      return;
+    }
     if (!isBreakable(id)) return;
     const changed = world.setBlock(x, y, z, 0);
     dbg("  setBlock -> changed=" + changed);
+    // setBlock already wakes the liquid simulator around the edit, so water
+    // flows into the newly opened space / recedes correctly.
     if (this.settings.mode === "survival") {
       const drop = dropForBlock(id);
       if (drop !== null) {
@@ -850,6 +889,9 @@ export class Game {
       this.settings.graphics.preset === "low" ? 0.42 : 0.5;
     this.scene.fogEnd = far;
     this.scene.fogStart = far * startFrac;
+    // Tell the underwater renderer the new above-water baseline so its blend
+    // target stays correct when the view distance / preset changes.
+    this.underwater.setSurfaceFog(this.scene.fogStart, this.scene.fogEnd, this.scene.fogColor);
   }
 
   private updateFps(dt: number): void {
@@ -886,6 +928,20 @@ export class Game {
     const dn = this.lighting?.dayNight;
     // JS heap is Chrome-only; report null elsewhere rather than misleading 0.
     const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+    // Liquid diagnostics.
+    const liquid = this.world?.liquidDebug();
+    const target = this.player.getTarget();
+    let targetLiquidType = "none";
+    let targetLiquidLevel = 0;
+    if (target) {
+      const tdef = getBlock(target.block);
+      if (tdef.liquidType && tdef.liquidType !== "none") {
+        targetLiquidType = tdef.liquidType;
+        if (tdef.liquidType === "flowing" && this.world) {
+          targetLiquidLevel = this.world.getLevel(target.x, target.y, target.z);
+        }
+      }
+    }
     return {
       fps: this.fpsEma,
       frameMs: this.frameMsEma,
@@ -902,6 +958,7 @@ export class Game {
       shadowCasters: casters,
       shadowsEnabled,
       waterMeshes: this.world?.waterMeshCount ?? 0,
+      waterVertices: this.world?.waterVertexCount ?? 0,
       preset: g.preset,
       viewDistance: this.settings.viewDistance,
       renderScale: g.renderScale,
@@ -919,6 +976,23 @@ export class Game {
       waterAlpha: this.world?.waterShader.currentAlpha ?? 1,
       waterQuality: this.world?.waterShader.currentQuality ?? "—",
       antiAliasing: g.antiAliasing,
+      inWater: this.player.inWater,
+      underwater: this.underwater.isUnderwater,
+      liquidQueue: liquid?.queueSize ?? 0,
+      liquidPriorityQueue: liquid?.priorityQueueSize ?? 0,
+      liquidProcessed: liquid?.processedLastTick ?? 0,
+      liquidBudget: liquid?.budget ?? 0,
+      liquidWrites: liquid?.totalWrites ?? 0,
+      liquidMsSinceTick: liquid?.msSinceLastTick ?? 0,
+      targetLiquidType,
+      targetLiquidLevel,
+      targetMode: this.player.targetLiquids ? "liquids" : "solids",
+      rayThroughLiquid: !!target?.passedThroughLiquid,
+      firstLiquid: target?.firstLiquid
+        ? { x: target.firstLiquid.x, y: target.firstLiquid.y, z: target.firstLiquid.z }
+        : null,
+      waterSidesOn: this.world?.waterSidesOn ?? true,
+      waterAnimOn: this.world?.waterShader.animationOn ?? true,
     };
   }
 
@@ -944,6 +1018,7 @@ export class Game {
     window.removeEventListener("resize", this.handleResize);
     this.input.dispose();
     this.graphics.dispose();
+    this.underwater.dispose();
     this.lighting?.dispose();
     this.world?.dispose();
     this.sky.dispose();
@@ -1118,6 +1193,38 @@ export class Game {
     this.hud.showToast(on ? "Water: opaque debug" : "Water: normal");
   }
 
+  /** Debug: enable/disable water side faces (top surface only when off). */
+  _setWaterSides(on: boolean): void {
+    this.world?.setWaterSides(on);
+    this.hud.showToast(on ? "Water sides: on" : "Water sides: off (surface only)");
+  }
+
+  /** Debug: enable/disable water surface scroll + shimmer animation. */
+  _setWaterAnim(on: boolean): void {
+    this.world?.waterShader.setAnimationEnabled(on);
+    this.hud.showToast(on ? "Water animation: on" : "Water animation: off");
+  }
+
+  /** Debug: toggle water depth-write (isolate transparency/depth artifacts). */
+  _setWaterDepth(on: boolean): void {
+    this.world?.waterShader.setDepthWrite(on);
+    this.hud.showToast(on ? "Water depth-write: ON (may show artifacts)" : "Water depth-write: off (default)");
+  }
+
+  /** Debug: swap water to a plain untextured material (isolate texture issues). */
+  _setWaterSimple(on: boolean): void {
+    this.world?.waterShader.setSimpleMaterial(on);
+    this.hud.showToast(on ? "Water: simple untextured" : "Water: normal textured");
+  }
+
+  /** Debug: toggle liquid targeting (ray stops at water vs passes through). */
+  _setTargetLiquids(on?: boolean): boolean {
+    if (on === undefined) this.player.targetLiquids = !this.player.targetLiquids;
+    else this.player.targetLiquids = on;
+    this.hud.showToast(this.player.targetLiquids ? "Targeting: liquids" : "Targeting: solids through water");
+    return this.player.targetLiquids;
+  }
+
   /** Debug: toggle distance fog. */
   _setFog(on: boolean): void {
     this.applySettings({ graphics: { ...this.settings.graphics, fog: on } });
@@ -1159,6 +1266,78 @@ export class Game {
     // eslint-disable-next-line no-console
     console.log("[water]", s);
     return s;
+  }
+
+  /**
+   * Liquid simulator audit for the console (`__voxl.liquid()`): queue size,
+   * budget, total writes, and the targeted block's liquid state. On-demand.
+   */
+  _liquidDebug(): unknown {
+    if (!this.world) return { error: "no world" };
+    const d = this.world.liquidDebug();
+    const target = this.player.getTarget();
+    let t: Record<string, unknown> | null = null;
+    if (target) {
+      const def = getBlock(target.block);
+      t = {
+        x: target.x, y: target.y, z: target.z,
+        block: target.block,
+        name: def.name,
+        liquidType: def.liquidType ?? "none",
+        level: def.liquidType === "flowing" ? this.world.getLevel(target.x, target.y, target.z) : 0,
+      };
+    }
+    const info = { ...d, inWater: this.player.inWater, underwater: this.underwater.isUnderwater, target: t };
+    // eslint-disable-next-line no-console
+    console.log("[liquid]", info);
+    return info;
+  }
+
+  /**
+   * Debug: place a water SOURCE at the targeted block's adjacent cell (or a
+   * given xyz) and wake the liquid simulator. Lets you test flow from the
+   * console without a bucket item. Usage: `__voxl.placeWater()` or
+   * `__voxl.placeWater(x,y,z)`.
+   */
+  _placeWater(x?: number, y?: number, z?: number): void {
+    if (!this.world) return;
+    let wx: number, wy: number, wz: number;
+    if (x !== undefined && y !== undefined && z !== undefined) {
+      wx = x; wy = y; wz = z;
+    } else {
+      const t = this.player.getTarget();
+      if (!t) { this.hud.showToast("Aim at a block first"); return; }
+      wx = t.px; wy = t.py; wz = t.pz;
+    }
+    this.world.setLiquid(wx, wy, wz, WATER_BLOCK, 0);
+    this.world.queueLiquidUpdate(wx, wy, wz);
+    this.hud.showToast(`Water source at ${wx},${wy},${wz}`);
+  }
+
+  /**
+   * Debug: remove liquid at the targeted block (or xyz). Equivalent to placing
+   * air; wakes the simulator so neighbours recompute.
+   */
+  _removeWater(x?: number, y?: number, z?: number): void {
+    if (!this.world) return;
+    let wx: number, wy: number, wz: number;
+    if (x !== undefined && y !== undefined && z !== undefined) {
+      wx = x; wy = y; wz = z;
+    } else {
+      const t = this.player.getTarget();
+      if (!t) { this.hud.showToast("Aim at a block first"); return; }
+      wx = t.x; wy = t.y; wz = t.z;
+    }
+    this.world.setLiquid(wx, wy, wz, 0, 0);
+    this.world.queueLiquidUpdate(wx, wy, wz);
+    this.hud.showToast(`Removed liquid at ${wx},${wy},${wz}`);
+  }
+
+  /** Debug: set the liquid simulator per-tick cell budget. */
+  _liquidBudget(n: number): void {
+    if (!this.world) return;
+    this.world.liquid.setBudget(n);
+    this.hud.showToast(`Liquid budget: ${n}/tick`);
   }
 
   /** TEMP debug: inspect interaction state. */

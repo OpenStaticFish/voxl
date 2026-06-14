@@ -13,7 +13,7 @@ import {
   REACH,
 } from "../constants";
 import type { Settings } from "../types";
-import { getBlock, WATER_BLOCK, CACTUS_BLOCK } from "./Blocks";
+import { getBlock, isLiquid, CACTUS_BLOCK } from "./Blocks";
 import type { World } from "./World";
 import type { Input } from "../engine/Input";
 import { raycastVoxel } from "./BlockRaycaster";
@@ -40,6 +40,13 @@ export class Player {
   flying = false;
   onGround = false;
   inWater = false;
+  /**
+   * Liquid-targeting mode (Luanti-style). When false (default) the ray passes
+   * THROUGH water to target the solid terrain behind/under it — the normal
+   * mining/building behaviour. When true the ray stops at the first liquid
+   * (bucket-style), so the player can select/remove water sources themselves.
+   */
+  targetLiquids = false;
   /** Whether double-tap-Space may toggle flight (creative only). */
   canFly = true;
 
@@ -107,11 +114,15 @@ export class Player {
   }
 
   private blockAtFeetIsWater(world: World): boolean {
-    return world.getBlock(
-      Math.floor(this.position.x),
-      Math.floor(this.position.y + 0.5),
-      Math.floor(this.position.z),
-    ) === WATER_BLOCK;
+    // Any liquid at feet counts as "in water" — flowing water swims the same
+    // as a source. This is the player's swim/drag/buoyancy trigger.
+    return isLiquid(
+      world.getBlock(
+        Math.floor(this.position.x),
+        Math.floor(this.position.y + 0.5),
+        Math.floor(this.position.z),
+      ),
+    );
   }
 
   update(dt: number, world: World, input: Input, settings: Settings): void {
@@ -156,14 +167,28 @@ export class Player {
       if (input.isDown("ShiftLeft") || input.isDown("ShiftRight")) vy -= 1;
       this.velocity.y = vy * speed;
     } else {
-      const speed = sprinting ? SPRINT_SPEED : WALK_SPEED;
+      // Horizontal speed is reduced in water (swim drag). Sprinting is ignored
+      // underwater — you can't sprint-swim.
+      const baseSpeed = sprinting ? SPRINT_SPEED : WALK_SPEED;
+      const speed = this.inWater ? baseSpeed * 0.55 : baseSpeed;
       this.velocity.x = wish.x * speed;
       this.velocity.z = wish.z * speed;
-      const g = this.inWater ? GRAVITY * 0.35 : GRAVITY;
+      // Buoyancy: much weaker gravity underwater so the player floats/sinks
+      // gently instead of plummeting.
+      const g = this.inWater ? GRAVITY * 0.22 : GRAVITY;
       this.velocity.y -= g * dt;
       if (this.inWater) {
-        this.velocity.y = Math.max(this.velocity.y, -4); // slow sink
-        if (input.isDown("Space")) this.velocity.y = 4; // swim up
+        // Clamp sink speed so the player drifts down slowly; space gives a
+        // steady upward swim impulse (held = sustained climb).
+        this.velocity.y = Math.max(this.velocity.y, -2.6);
+        if (input.isDown("Space")) this.velocity.y = 5.2;
+        // Gentle horizontal drag so the player coasts to a stop in water.
+        // dt-aware exponential decay so the feel is identical at 30 / 60 / 144
+        // FPS (0.86 is the per-60Hz-frame factor; pow scales it to the actual
+        // frame delta).
+        const drag = Math.pow(0.86, dt * 60);
+        this.velocity.x *= drag;
+        this.velocity.z *= drag;
       } else if (input.isDown("Space") && this.onGround) {
         this.velocity.y = JUMP_SPEED;
         this.onGround = false;
@@ -226,29 +251,55 @@ export class Player {
 
     // --- Targeting raycast ---
     // Forward = Ry(yaw) * Rx(pitch) * (0, 0, -1) — same as three.js YXZ.
+    // Targeting mode (Luanti-style): default passes through liquids so the
+    // player can mine/build underwater; liquid mode stops at the water surface.
     const eye = this.camera.position;
-    if (input.locked) {
-      const cp = Math.cos(this.pitch);
-      const fx = -Math.sin(this.yaw) * cp;
-      const fy = Math.sin(this.pitch);
-      const fz = -Math.cos(this.yaw) * cp;
-      this.target = raycastVoxel(world, eye.x, eye.y, eye.z, fx, fy, fz, REACH);
-    } else {
-      // Pointer lock unavailable: aim via the cursor position instead so the
-      // game stays fully playable (build/mine) without mouse-look.
-      const sc = this.camera.getScene() as Scene;
-      const ray = sc.createPickingRay(sc.pointerX, sc.pointerY, Matrix.Identity(), this.camera);
-      this.target = raycastVoxel(
-        world,
-        ray.origin.x,
-        ray.origin.y,
-        ray.origin.z,
-        ray.direction.x,
-        ray.direction.y,
-        ray.direction.z,
-        REACH,
-      );
+    const aimRay = input.locked
+      ? (() => {
+          const cp = Math.cos(this.pitch);
+          return {
+            x: eye.x, y: eye.y, z: eye.z,
+            dx: -Math.sin(this.yaw) * cp,
+            dy: Math.sin(this.pitch),
+            dz: -Math.cos(this.yaw) * cp,
+          };
+        })()
+      : (() => {
+          // Pointer lock unavailable: aim via the cursor so the game stays
+          // playable (build/mine) without mouse-look.
+          const sc = this.camera.getScene() as Scene;
+          const ray = sc.createPickingRay(sc.pointerX, sc.pointerY, Matrix.Identity(), this.camera);
+          return { x: ray.origin.x, y: ray.origin.y, z: ray.origin.z, dx: ray.direction.x, dy: ray.direction.y, dz: ray.direction.z };
+        })();
+    this.target = this.computeTarget(world, aimRay.x, aimRay.y, aimRay.z, aimRay.dx, aimRay.dy, aimRay.dz);
+  }
+
+  /**
+   * Resolve the active targeted block from the current aim ray + targeting
+   * mode. In solid mode the ray ignores liquids (stops at the first solid),
+   * falling back to the first liquid if no solid is reached (so open water is
+   * still selectable). In liquid mode the ray stops at the first non-air cell,
+   * letting the player point at the water surface itself.
+   */
+  private computeTarget(
+    world: World,
+    ox: number, oy: number, oz: number,
+    dx: number, dy: number, dz: number,
+  ): RaycastHit | null {
+    if (this.targetLiquids) {
+      // Stop at the first non-air cell (water surface or solid).
+      return raycastVoxel(world, ox, oy, oz, dx, dy, dz, REACH, { ignoreLiquid: false });
     }
+    // Solid mode: pass through liquids to reach terrain.
+    const hit = raycastVoxel(world, ox, oy, oz, dx, dy, dz, REACH, { ignoreLiquid: true });
+    if (hit) return hit;
+    return null;
+  }
+
+  /** Toggle liquid-targeting mode (Luanti `liquids` pointability flip). */
+  toggleTargetLiquids(): boolean {
+    this.targetLiquids = !this.targetLiquids;
+    return this.targetLiquids;
   }
 
   /** The block the camera is currently looking at (for break/place). */
@@ -282,14 +333,29 @@ export class Player {
     this.wasOnGround = this.onGround;
   }
 
-  /** Head (eye) submerged in water — used for the drowning breath meter. */
+  /** Head (eye) submerged in a liquid — used for the drowning breath meter
+   *  and the underwater screen tint/fog. Any liquid counts (source or flowing). */
   headSubmerged(world: World): boolean {
     const eyeY = this.position.y + PLAYER_EYE_HEIGHT;
-    return world.getBlock(
+    return isLiquid(
+      world.getBlock(
+        Math.floor(this.position.x),
+        Math.floor(eyeY),
+        Math.floor(this.position.z),
+      ),
+    );
+  }
+
+  /** The liquid block id at the player's eye, or 0 if eyes are in air. Used by
+   *  the underwater renderer to pick the right fog colour/density per liquid. */
+  liquidAtEye(world: World): number {
+    const eyeY = this.position.y + PLAYER_EYE_HEIGHT;
+    const id = world.getBlock(
       Math.floor(this.position.x),
       Math.floor(eyeY),
       Math.floor(this.position.z),
-    ) === WATER_BLOCK;
+    );
+    return isLiquid(id) ? id : 0;
   }
 
   /** Touching a cactus block anywhere in the player's AABB. */

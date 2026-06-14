@@ -25,7 +25,9 @@ import {
 } from "./lighting/LightingConfig";
 import type { FoliageDensity, WaterQuality } from "./graphics/GraphicsSettings";
 import { dbg } from "../state/Debug";
-import { WATER_BLOCK } from "./Blocks";
+import { getBlock, WATER_BLOCK } from "./Blocks";
+import { LiquidSimulator, DEFAULT_LIQUID_BUDGET, LIQUID_TICK_RATE_HZ, LIQUID_IMMEDIATE_BURST } from "./liquid/LiquidSimulator";
+import type { LiquidAccess, LiquidDebugSnapshot } from "./liquid/LiquidTypes";
 
 function key(cx: number, cz: number): string {
   return `${cx},${cz}`;
@@ -80,11 +82,36 @@ export class World {
   private lightDebugMode: LightDebugMode = "off";
 
   /**
+   * Voxel liquid flow simulator + its bounded update queue. Owns the flow
+   * logic; reads/writes through {@link liquidAccess} (→ this world). Ticked
+   * from {@link update} at a fixed rate with a per-tick cell budget so water
+   * never runs every render frame and never re-simulates the whole world.
+   */
+  readonly liquid = new LiquidSimulator();
+  private readonly liquidAccess: LiquidAccess = {
+    getBlock: (x, y, z) => this.getBlock(x, y, z),
+    getLevel: (x, y, z) => this.getLevel(x, y, z),
+    setLiquid: (x, y, z, id, level) => this.setLiquid(x, y, z, id, level),
+    isChunkLoaded: (x, z) => this.isChunkLoaded(x, z),
+  };
+  /** Accumulator for the fixed-rate liquid tick. */
+  private liquidAccumulator = 0;
+  /** Last liquid tick's cell budget (reported by the debug overlay). */
+  private liquidTickBudget = DEFAULT_LIQUID_BUDGET;
+
+  /**
    * Debug: when false, all water (transparent) meshes are hidden. Use to
    * confirm whether a suspect patch is the water layer. Read at mesh creation;
    * toggling also updates existing meshes via {@link setWaterEnabled}.
    */
   private waterEnabled = true;
+
+  /**
+   * Debug: when false, water renders its top surface only (no side faces).
+   * Read at mesh rebuild; flip + request a remesh to compare. Useful to
+   * isolate whether a visual artifact comes from water sides vs the surface.
+   */
+  private waterSidesEnabled = true;
 
   /**
    * Debug: when true, all chunk meshes get `alwaysSelectAsActiveMesh = true` so
@@ -192,6 +219,60 @@ export class World {
     return chunk.getLocal(wx - cx * CHUNK_SIZE, wy, wz - cz * CHUNK_SIZE);
   }
 
+  /** Per-voxel liquid level at world coords (0 for non-flowing / unloaded). */
+  getLevel(wx: number, wy: number, wz: number): number {
+    if (wy < 0 || wy >= CHUNK_HEIGHT) return 0;
+    const cx = Math.floor(wx / CHUNK_SIZE);
+    const cz = Math.floor(wz / CHUNK_SIZE);
+    const chunk = this.chunks.get(key(cx, cz));
+    if (!chunk) return 0;
+    return chunk.getLocalLevel(wx - cx * CHUNK_SIZE, wy, wz - cz * CHUNK_SIZE);
+  }
+
+  /** Whether the chunk owning these world coords is generated/loaded. */
+  isChunkLoaded(wx: number, wz: number): boolean {
+    const cx = Math.floor(wx / CHUNK_SIZE);
+    const cz = Math.floor(wz / CHUNK_SIZE);
+    const chunk = this.chunks.get(key(cx, cz));
+    return !!chunk && chunk.generated;
+  }
+
+  /**
+   * Write a liquid cell (block id + level). Used by the liquid simulator and by
+   * creative water placement. Performs the same lighting + dirty + neighbour
+   * bookkeeping as {@link setBlock}, but DOES NOT rebuild the mesh immediately
+   * — the streaming pass rebuilds affected chunks in budget. Returns true if
+   * the cell changed.
+   */
+  setLiquid(wx: number, wy: number, wz: number, id: BlockId, level: number): boolean {
+    if (wy < 0 || wy >= CHUNK_HEIGHT) return false;
+    const cx = Math.floor(wx / CHUNK_SIZE);
+    const cz = Math.floor(wz / CHUNK_SIZE);
+    const chunk = this.chunks.get(key(cx, cz));
+    if (!chunk || !chunk.generated) return false;
+    const lx = wx - cx * CHUNK_SIZE;
+    const lz = wz - cz * CHUNK_SIZE;
+    const changed = chunk.setLocalWithLevel(lx, wy, lz, id, level);
+    if (!changed) return false;
+    // Liquids affect light (flowing water is transparent + light-conducting),
+    // so recompute lighting exactly like a terrain edit.
+    this.relightChunkNow(chunk, false);
+    // A border edit may change a neighbour's border faces/light too. Liquids are
+    // transparent + light-conducting, so a lighting change is NOT guaranteed
+    // (unlike opaque edits); mark the neighbour dirty explicitly so its border
+    // water side/step faces remesh even when light is unchanged.
+    if (lx === 0) { this.queueNeighbourLight(cx - 1, cz); this.markDirty(cx - 1, cz); }
+    if (lx === CHUNK_SIZE - 1) { this.queueNeighbourLight(cx + 1, cz); this.markDirty(cx + 1, cz); }
+    if (lz === 0) { this.queueNeighbourLight(cx, cz - 1); this.markDirty(cx, cz - 1); }
+    if (lz === CHUNK_SIZE - 1) { this.queueNeighbourLight(cx, cz + 1); this.markDirty(cx, cz + 1); }
+    return true;
+  }
+
+  /** Queue a cell for the liquid simulator (external triggers: edits, gen). */
+  queueLiquidUpdate(wx: number, wy: number, wz: number): void {
+    this.liquid.enqueue(wx, wy, wz);
+  }
+
   /** Edit a block. Returns true if the world changed. */
   setBlock(wx: number, wy: number, wz: number, id: BlockId): boolean {
     if (wy < 0 || wy >= CHUNK_HEIGHT) return false;
@@ -215,12 +296,107 @@ export class World {
     if (lz === 0) this.queueNeighbourLight(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) this.queueNeighbourLight(cx, cz + 1);
     this.rebuildMesh(chunk);
+    // Wake the liquid simulator around the edit on the PRIORITY lane so water
+    // reacts immediately (not behind the ocean-seeding backlog). Then fire an
+    // immediate burst so the FIRST flow step happens this frame — the player
+    // sees water start filling the gap within ~1 frame instead of seconds. The
+    // burst's writes mark affected chunks dirty; the streaming mesh pass
+    // (closest-first, next frame) remeshes them, keeping the visual in lockstep.
+    this.liquid.enqueueAround(wx, wy, wz);
+    const burst = this.liquid.tickPriority(this.liquidAccess, LIQUID_IMMEDIATE_BURST);
+    dbg(
+      "Block edit at", wx, wy, wz, "->",
+      "queued 7 priority positions; immediate burst processed", burst,
+      "cells; queue now", this.liquid.queueSize, "(priority", this.liquid.priorityQueueSize + ")",
+    );
     return true;
   }
 
   private markDirty(cx: number, cz: number): void {
     const chunk = this.chunks.get(key(cx, cz));
     if (chunk && chunk.generated) chunk.dirty = true;
+  }
+
+  /**
+   * Wake the liquid simulator for every LIQUID cell along one edge of chunk
+   * (cx,cz). Used when a neighbouring chunk unloads: the liquid that was fed
+   * across that border must recompute (it may now dry up). `edge` selects the
+   * shared border — "xHigh"/"xLow" scan a constant local X column, "zHigh"/
+   * "zLow" a constant local Z row. Only liquid cells are enqueued, so the cost
+   * is bounded by how much water actually sits on the border (usually little).
+   */
+  private wakeBorderLiquid(cx: number, cz: number, edge: "xHigh" | "xLow" | "zHigh" | "zLow"): void {
+    const chunk = this.chunks.get(key(cx, cz));
+    if (!chunk || !chunk.generated) return;
+    const ox = chunk.originX;
+    const oz = chunk.originZ;
+    const b = chunk.blocks;
+    if (edge === "xHigh" || edge === "xLow") {
+      const lx = edge === "xHigh" ? CHUNK_SIZE - 1 : 0;
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+          const id = b[(y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx];
+          if (getBlock(id).liquid) this.liquid.enqueue(ox + lx, y, oz + lz);
+        }
+      }
+    } else {
+      const lz = edge === "zHigh" ? CHUNK_SIZE - 1 : 0;
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          const id = b[(y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx];
+          if (getBlock(id).liquid) this.liquid.enqueue(ox + lx, y, oz + lz);
+        }
+      }
+    }
+  }
+
+  /**
+   * After a chunk generates, wake the liquid simulator for every water cell
+   * that touches a floodable neighbour. This seeds cross-chunk flow at lake /
+   * ocean shores and waterfalls without re-simulating the (mostly solid) bulk
+   * of the chunk. Bounded: at most a few hundred enqueues per freshly streamed
+   * chunk, processed over several ticks by the budget.
+   */
+  private seedLiquidForChunk(chunk: Chunk): void {
+    const ox = chunk.originX;
+    const oz = chunk.originZ;
+    const b = chunk.blocks;
+    for (let y = 0; y < CHUNK_HEIGHT; y++) {
+      for (let z = 0; z < CHUNK_SIZE; z++) {
+        for (let x = 0; x < CHUNK_SIZE; x++) {
+          const id = b[(y * CHUNK_SIZE + z) * CHUNK_SIZE + x];
+          if (id !== WATER_BLOCK) continue;
+          // Only seed sources that have at least one floodable neighbour
+          // (the others are fully embedded in a source lake and have nothing
+          // to do until something nearby changes).
+          const wx = ox + x;
+          const wz = oz + z;
+          // A source only does work if it can pour DOWN or spread SIDEWAYS into
+          // a floodable cell. Air ABOVE never receives flow (water doesn't flow
+          // up), so we don't check +Y — this keeps a stable ocean's interior
+          // sources out of the queue entirely (only shore/waterfall sites wake).
+          if (
+            this.isFloodableAt(wx + 1, y, wz) ||
+            this.isFloodableAt(wx - 1, y, wz) ||
+            this.isFloodableAt(wx, y, wz + 1) ||
+            this.isFloodableAt(wx, y, wz - 1) ||
+            this.isFloodableAt(wx, y - 1, wz)
+          ) {
+            this.liquid.enqueue(wx, y, wz);
+          }
+        }
+      }
+    }
+  }
+
+  private isFloodableAt(wx: number, wy: number, wz: number): boolean {
+    if (wy < 0) return false;
+    if (wy >= CHUNK_HEIGHT) return true; // above world = air = floodable
+    const id = this.getBlock(wx, wy, wz);
+    if (id === 0) return true;
+    const def = getBlock(id);
+    if (def.liquid) return false;
+    return !def.solid;
   }
 
   // --------------------------------------------------------- lighting ---
@@ -389,6 +565,9 @@ export class World {
       this.markDirty(cx + 1, cz);
       this.markDirty(cx, cz - 1);
       this.markDirty(cx, cz + 1);
+      // Wake the liquid simulator at shore/waterfall sites in this chunk so
+      // cross-chunk flow initializes as chunks stream in.
+      this.seedLiquidForChunk(chunk);
     }
     return chunk;
   }
@@ -436,6 +615,9 @@ export class World {
         this.markDirty(cx + 1, cz);
         this.markDirty(cx, cz - 1);
         this.markDirty(cx, cz + 1);
+        // Seed liquid flow at shore/waterfall sites so cross-chunk water
+        // updates begin as soon as a chunk streams in.
+        this.seedLiquidForChunk(chunk);
         genBudget--;
       }
     }
@@ -443,6 +625,19 @@ export class World {
     // Propagate queued light updates (closest-first budget) BEFORE meshing so
     // meshes always read fresh light values.
     this.processLightDirty(lightBudget);
+
+    // Run the liquid flow simulator at a fixed rate (decoupled from fps) with a
+    // frame-aware budget. Water therefore never runs every render frame, and on
+    // a stuttering frame the budget shrinks so flow can't compound a spike.
+    this.liquidAccumulator += frameMs / 1000;
+    const tickInterval = 1 / LIQUID_TICK_RATE_HZ;
+    if (this.liquidAccumulator >= tickInterval) {
+      this.liquidAccumulator = 0; // fixed cadence (skip accrued slack)
+      const liquidBudget = Math.max(16, Math.round(DEFAULT_LIQUID_BUDGET * f));
+      this.liquidTickBudget = liquidBudget;
+      this.liquid.setBudget(liquidBudget);
+      this.liquid.tick(this.liquidAccess);
+    }
 
     // Mesh dirty chunks (closest first), respecting the budget.
     for (const off of order) {
@@ -467,6 +662,21 @@ export class World {
         this.chunks.delete(k);
         this.lighting.removeLight(chunk.cx, chunk.cz);
         this.lightDirty.delete(k);
+        // When a chunk vanishes, its border cells change from "loaded" to
+        // "void", which affects the liquid simulator: water that was flowing
+        // FROM the unloaded chunk into a neighbour loses its feeder and must
+        // dry up. markDirty only flags a remesh — it does NOT recompute liquid
+        // state — so also wake the simulator for the liquid cells along each
+        // neighbour's shared border. Otherwise stale flowing water hangs in the
+        // air at the new world edge.
+        this.markDirty(chunk.cx - 1, chunk.cz);
+        this.markDirty(chunk.cx + 1, chunk.cz);
+        this.markDirty(chunk.cx, chunk.cz - 1);
+        this.markDirty(chunk.cx, chunk.cz + 1);
+        this.wakeBorderLiquid(chunk.cx - 1, chunk.cz, "xHigh");
+        this.wakeBorderLiquid(chunk.cx + 1, chunk.cz, "xLow");
+        this.wakeBorderLiquid(chunk.cx, chunk.cz - 1, "zHigh");
+        this.wakeBorderLiquid(chunk.cx, chunk.cz + 1, "zLow");
       }
     }
 
@@ -496,7 +706,9 @@ export class World {
     const result = buildChunkGeometry(
       chunk,
       (x, y, z) => this.getBlock(x, y, z),
+      (x, y, z) => this.getLevel(x, y, z),
       this.sampleBrightness,
+      { waterSides: this.waterSidesEnabled },
     );
     const k = key(chunk.cx, chunk.cz);
     const existing = this.meshes.get(k);
@@ -618,6 +830,21 @@ export class World {
   }
 
   /**
+   * Debug: toggle water side faces (shore/waterfall walls). When off, only the
+   * top surface renders — useful to isolate whether an artifact comes from the
+   * sides. Marks every loaded chunk dirty so the change is picked up on the
+   * next mesh-budget pass.
+   */
+  setWaterSides(on: boolean): void {
+    this.waterSidesEnabled = on;
+    for (const chunk of this.chunks.values()) if (chunk.generated) chunk.dirty = true;
+  }
+
+  get waterSidesOn(): boolean {
+    return this.waterSidesEnabled;
+  }
+
+  /**
    * Debug: dump every chunk mesh's name, material name, and triangle count to
    * the console — for correlating a visible patch with the mesh/material that
    * produces it.
@@ -655,6 +882,18 @@ export class World {
     return n;
   }
 
+  /** Total vertex count across all water (transparent) meshes (debug overlay). */
+  get waterVertexCount(): number {
+    let n = 0;
+    for (const entry of this.meshes.values()) {
+      const m = entry.transparent;
+      if (!m) continue;
+      const vd = m.getVerticesData?.("position");
+      if (vd) n += vd.length / 3;
+    }
+    return n;
+  }
+
   /**
    * Full water audit (for the console `__voxl.waterStats()` only — iterates
    * every loaded block, so do not call per-frame). Reports how many loaded
@@ -673,10 +912,24 @@ export class World {
     return { chunksWithWater, waterBlocks, loaded: this.chunks.size };
   }
 
+  /** Liquid simulator snapshot for the debug overlay (queue/budget/writes). */
+  liquidDebug(): LiquidDebugSnapshot {
+    const snap = this.liquid.debug;
+    return { ...snap, dirtyChunks: this.dirtyChunkCount };
+  }
+
+  /** Number of chunks currently flagged for a remesh (liquid + terrain). */
+  private get dirtyChunkCount(): number {
+    let n = 0;
+    for (const chunk of this.chunks.values()) if (chunk.dirty) n++;
+    return n;
+  }
+
   dispose(): void {
     for (const k of [...this.meshes.keys()]) this.disposeMeshes(k);
     this.chunks.clear();
     this.lightDirty.clear();
+    this.liquid.reset();
     this.lighting.dispose();
     this.terrainOpaque.dispose();
     this.terrainCutout.dispose();
