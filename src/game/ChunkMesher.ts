@@ -1,7 +1,7 @@
 import { VertexData } from "@babylonjs/core";
 import { CHUNK_SIZE, CHUNK_HEIGHT } from "../constants";
 import type { BlockId, FaceDef } from "../types";
-import { getBlock } from "./Blocks";
+import { getBlock, MAX_LIQUID_LEVEL, FACE, type BlockDef } from "./Blocks";
 import { tileUV } from "../engine/Textures";
 import type { Chunk } from "./Chunk";
 import { FACE_SHADE, PLANT_SHADE } from "./lighting/LightingConfig";
@@ -28,6 +28,9 @@ export interface BrightnessSample {
 }
 
 export type BrightnessSampler = (wx: number, wy: number, wz: number, shade: number) => BrightnessSample;
+
+/** Per-voxel liquid level accessor (world coords; 0 for non-flowing). */
+export type LevelSampler = (wx: number, wy: number, wz: number) => number;
 
 // The six cube faces. Corner order + UVs are tuned so that triangles
 // (0,1,2, 2,1,3) produce correctly-wound front faces. Order matches the
@@ -137,8 +140,32 @@ function shouldRenderFace(self: BlockId, neighbor: BlockId): boolean {
   if (neighbor === 0) return true; // air always shows the face
   const nb = getBlock(neighbor);
   if (nb.opaque) return false; // hidden by opaque neighbor
-  // Transparent neighbor: render unless it's the same type (water-water, etc.)
+  // Transparent neighbor: render unless it's the same liquid family
+  // (water-source / water-flowing share a face → cull). Other transparent
+  // blocks (e.g. a plant next to water) still show the face.
+  if (nb.liquid) return !isSameLiquid(self, neighbor);
   return getBlock(self).id !== nb.id;
+}
+
+/**
+ * True if two blocks belong to the same liquid family (e.g. water source +
+ * flowing water). Used to cull faces between adjacent water cells and to draw
+ * "steps" between differing flowing levels instead of leaving gaps.
+ */
+function isSameLiquid(a: BlockId, b: BlockId): boolean {
+  if (a === b) return true;
+  const da = getBlock(a);
+  const db = getBlock(b);
+  if (!da.liquid || !db.liquid) return false;
+  return da.liquidDef?.id === db.liquidDef?.id && da.liquidDef?.id !== undefined;
+}
+
+/** Render height (fraction of a block) for a liquid cell. */
+function liquidTopFrac(def: BlockDef, level: number): number {
+  if (def.liquidType === "source") return 0.9; // matches the pre-overfall surface dip
+  const f = (level <= 0 ? 0 : level > MAX_LIQUID_LEVEL ? MAX_LIQUID_LEVEL : level) / (MAX_LIQUID_LEVEL + 1);
+  // Keep a visible minimum so level-1 trickles still render.
+  return f < 0.12 ? 0.12 : f;
 }
 
 export interface MeshResult {
@@ -205,6 +232,131 @@ function pushFace(
   b.vertexCount += 4;
 }
 
+/**
+ * Push a liquid face whose vertical extent is mapped to a custom [bottom,top]
+ * block fraction (0..1) rather than the full cube. This is what lets flowing
+ * water render at partial height and lets "steps" between differing flowing
+ * levels draw as exposed vertical strips.
+ *
+ * UVs are WORLD-SPACE (derived from each corner's world position + the face
+ * normal), NOT atlas-tile UVs. This is critical for water: the shared surface
+ * texture then maps continuously across the whole body (no per-block tiling
+ * grid), and scrolling uOffset/vOffset on the material animates the entire
+ * surface as one. The texture's uScale/vScale (+ WRAP) handle the repeat rate.
+ */
+function pushScaledFace(
+  b: BufferBuilder,
+  faceIndex: number,
+  x: number,
+  y: number,
+  z: number,
+  sample: BrightnessSample,
+  bottomFrac: number,
+  topFrac: number,
+): void {
+  const face = FACES[faceIndex];
+  const nx = face.normal[0];
+  const ny = face.normal[1];
+  const base = b.vertexCount;
+  // Water colours are stripped by World before upload (StandardMaterial
+  // supplies a uniform tint + texture), but keep baking them so the buffer
+  // shape is consistent with the terrain pass.
+  const cr = sample.sunBright;
+  const cg = sample.blockBright;
+  const cb = sample.sunLevel;
+  const ca = sample.blockLevel;
+  for (let c = 0; c < 4; c++) {
+    const corner = face.corners[c];
+    // corner[1] is 0 (bottom) or 1 (top); map to the requested Y band.
+    const fy = corner[1] === 1 ? topFrac : bottomFrac;
+    const wx = x + corner[0];
+    const wy = y + fy;
+    const wz = z + corner[2];
+    b.positions.push(wx, wy, wz);
+    b.normals.push(nx, ny, face.normal[2]);
+    // Pick the two in-plane world axes from the face normal so the surface
+    // texture is continuous: Y-faces → (X,Z); X-faces → (Z,Y); Z-faces → (X,Y).
+    let u: number;
+    let v: number;
+    if (ny !== 0) { u = wx; v = wz; }
+    else if (nx !== 0) { u = wz; v = wy; }
+    else { u = wx; v = wy; }
+    b.uvs.push(u, v);
+    b.colors.push(cr, cg, cb, ca);
+  }
+  b.indices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3);
+  b.vertexCount += 4;
+}
+
+/**
+ * Build the water geometry for a single liquid cell (source or flowing).
+ *
+ *   • Top (+Y): drawn at the cell's surface height when the cell above is not
+ *     the same liquid (air/solid lid → exposed surface). This is the primary
+ *     visible surface.
+ *   • Sides: drawn against non-water neighbours; between two water cells of
+ *     differing level, only the exposed vertical strip (neighbourTop..top) is
+ *     drawn so shorelines and waterfalls show clean steps with no gaps.
+ *
+ * Internal faces (between two cells of the SAME liquid + same level) are NOT
+ * drawn — that is what makes a lake read as one continuous body instead of a
+ * grid of glass cubes. Bottom faces are never drawn: they're always coplanar
+ * with the terrain below (invisible + a z-fight source).
+ *
+ * Source cells render at a near-full height (0.9); flowing cells at level/(MAX+1).
+ */
+function pushLiquidCell(
+  b: BufferBuilder,
+  getBlockWorld: (x: number, y: number, z: number) => BlockId,
+  getLevelWorld: (x: number, y: number, z: number) => number,
+  x: number,
+  y: number,
+  z: number,
+  def: BlockDef,
+  level: number,
+  sampleBrightness: BrightnessSampler,
+  renderSides: boolean,
+): void {
+  const top = liquidTopFrac(def, level);
+  const above = getBlockWorld(x, y + 1, z);
+
+  // +Y top surface (only when not submerged under the same liquid). This is the
+  // only face rendered for an interior source cell of a flat lake.
+  if (!isSameLiquid(def.id, above)) {
+    pushScaledFace(b, FACE.PY, x, y, z, sampleBrightness(x, y + 1, z, FACE_BRIGHTNESS[FACE.PY]), top, top);
+  }
+
+  if (!renderSides) return;
+
+  // Horizontal faces: step against lower-level water, full against non-water.
+  // Between equal-level same-liquid neighbours NOTHING is drawn (culled), which
+  // is what removes the internal grid. Only shore/exposed/step faces render.
+  const below = getBlockWorld(x, y - 1, z);
+  const horiz: Array<[number, number, number, number]> = [
+    [FACE.PX, x + 1, y, z],
+    [FACE.NX, x - 1, y, z],
+    [FACE.PZ, x, y, z + 1],
+    [FACE.NZ, x, y, z - 1],
+  ];
+  for (const [fi, nx, ny, nz] of horiz) {
+    const nid = getBlockWorld(nx, ny, nz);
+    if (isSameLiquid(def.id, nid)) {
+      const ndef = getBlock(nid);
+      const nTop = liquidTopFrac(ndef, ndef.liquidType === "flowing" ? getLevelWorld(nx, ny, nz) : 0);
+      if (nTop < top - 1e-3) {
+        // Exposed step: strip from the neighbour's surface up to ours.
+        pushScaledFace(b, fi, x, y, z, sampleBrightness(nx, ny, nz, FACE_BRIGHTNESS[fi]), nTop, top);
+      }
+    } else if (nid !== 0 && getBlock(nid).opaque) {
+      // Hidden by opaque terrain — cull.
+    } else {
+      // Air / plant / different transparent — full side.
+      void below;
+      pushScaledFace(b, fi, x, y, z, sampleBrightness(nx, ny, nz, FACE_BRIGHTNESS[fi]), 0, top);
+    }
+  }
+}
+
 // Two diagonal quads forming an "X" — the classic plantlike cross used for
 // grass tufts, flowers and mushrooms. Rendered in the cutout pass.
 function pushCross(b: BufferBuilder, x: number, y: number, z: number, tile: number, sample: BrightnessSample): void {
@@ -257,18 +409,29 @@ function toVertexData(b: BufferBuilder): VertexData | null {
   return vd;
 }
 
+/** Options for {@link buildChunkGeometry} (debug toggles threaded from World). */
+export interface MeshOptions {
+  /** When false, skip water side faces (top surface only) — debug isolation. */
+  waterSides?: boolean;
+}
+
 /**
  * Build opaque + transparent geometry for a chunk. `getBlockWorld` returns the
  * block id at world coordinates (0 = air for unloaded/out-of-range-above,
- * opaque for below the world floor). `sampleBrightness` returns the final
- * vertex brightness (0..1) for the cell a face looks into, given the face's
- * directional shade — it encodes voxel light + day/night + debug mode.
+ * opaque for below the world floor). `getLevelWorld` returns the per-voxel
+ * liquid level (used for partial-height flowing water). `sampleBrightness`
+ * returns the final vertex brightness (0..1) for the cell a face looks into,
+ * given the face's directional shade — it encodes voxel light + day/night +
+ * debug mode.
  */
 export function buildChunkGeometry(
   chunk: Chunk,
   getBlockWorld: (x: number, y: number, z: number) => BlockId,
+  getLevelWorld: (x: number, y: number, z: number) => number,
   sampleBrightness: BrightnessSampler,
+  opts?: MeshOptions,
 ): MeshResult {
+  const waterSides = opts?.waterSides ?? true;
   const opaque = newBuilder();
   const cutout = newBuilder();
   const transparent = newBuilder();
@@ -291,9 +454,14 @@ export function buildChunkGeometry(
           pushCross(cutout, wx, wy, wz, def.tiles[2], br);
           continue;
         }
-        // Only water (liquids) uses the transparent pass/material. Leaves are
-        // opaque-textured and render in the opaque pass for correct depth.
-        const builder = def.liquid ? transparent : opaque;
+        // Liquids (water source + flowing) use the transparent pass with
+        // partial-height geometry and stepped shorelines.
+        if (def.liquid) {
+          const level = chunk.getLocalLevel(x, y, z);
+          pushLiquidCell(transparent, getBlockWorld, getLevelWorld, wx, wy, wz, def, level, sampleBrightness, waterSides);
+          continue;
+        }
+        // Opaque cubes (terrain, leaves, ores, …).
         for (let f = 0; f < 6; f++) {
           const n = FACES[f].neighbor;
           const nwx = wx + n[0];
@@ -304,10 +472,7 @@ export function buildChunkGeometry(
           // Face brightness comes from the light of the cell the face is
           // exposed to (the neighbour air/space), combined with face shade.
           const sample = sampleBrightness(nwx, nwy, nwz, FACE_BRIGHTNESS[f]);
-          const isWaterTop = def.liquid && n[1] === 1;
-          // All faces bake four-channel light colours; the water pass discards
-          // them (World strips the colour kind) since it uses a StandardMaterial.
-          pushFace(builder, f, wx, wy, wz, def.tiles[f], sample, true, isWaterTop);
+          pushFace(opaque, f, wx, wy, wz, def.tiles[f], sample, true, false);
         }
       }
     }

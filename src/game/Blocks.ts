@@ -89,6 +89,54 @@ export interface BlockLightDefinition {
   receivesShadows?: boolean;
 }
 
+/**
+ * Minetest/Luanti-style liquid behaviour for a block. Attached to BOTH the
+ * source and the flowing member of a liquid pair (see `liquidType`). The pair
+ * shares the same `LiquidDef`; only `liquidType` differs.
+ *
+ * Level/depth is NOT stored here — it is per-voxel (see `Chunk.levels` and
+ * `liquidHeight()`). Source cells are implicitly "full"; flowing cells carry a
+ * 1..MAX_LEVEL value that decays one step per horizontal spread.
+ */
+export interface LiquidDef {
+  /** Logical liquid id ("water", "lava", …). Source + flowing share this. */
+  id: string;
+  /** Max horizontal distance flowing spreads from a source on flat ground. */
+  range: number;
+  /** Flow speed tier (0 fastest → 7 slowest). Slows the update rate. */
+  viscosity: number;
+  /** Whether 2+ adjacent sources may renew a new source (infinite water). */
+  renewable: boolean;
+  /** Applies swim physics (buoyancy/drag) to the player. */
+  swimmable: boolean;
+  /** Drowning damage per second when the player's head is submerged (0 = none). */
+  drowning: number;
+  /** Screen tint (hex) applied when the camera is submerged in this liquid. */
+  fogColor: string;
+  /** Fog-distance multiplier when submerged (<1 = murkier). */
+  fogDensity: number;
+}
+
+/** Liquid role of a block (Minetest `liquidtype`). */
+export type LiquidType = "none" | "source" | "flowing";
+
+/** Shared liquid definition for water (source + flowing pair). Declared here,
+ *  before the block table, so the Water / Flowing Water entries can reference
+ *  it without a temporal-dead-zone error. */
+export const WATER_LIQUID_DEF: LiquidDef = {
+  id: "water",
+  range: 7,
+  viscosity: 1,
+  renewable: true,
+  swimmable: true,
+  drowning: 0, // breath/drowning handled by PlayerState; scaffold value
+  fogColor: "#1f6fb0",
+  fogDensity: 0.45,
+};
+
+/** Maximum flowing-liquid level (full flowing just under a source). */
+export const MAX_LIQUID_LEVEL = 7;
+
 export interface BlockDef {
   id: BlockId;
   name: string;
@@ -108,6 +156,10 @@ export interface BlockDef {
   shape?: "plantlike";
   /** Voxel lighting behaviour. Omitted fields resolve to documented defaults. */
   light?: BlockLightDefinition;
+  /** Liquid role (source/flowing/none). `liquid` must be true when non-"none". */
+  liquidType?: LiquidType;
+  /** Liquid definition (range/viscosity/renewable/swim/drown/fog). */
+  liquidDef?: LiquidDef;
 }
 
 function uniform(tile: number): readonly [number, number, number, number, number, number] {
@@ -201,6 +253,8 @@ export const BLOCKS: readonly BlockDef[] = [
     opaque: false,
     transparent: true,
     liquid: true,
+    liquidType: "source",
+    liquidDef: WATER_LIQUID_DEF,
     // Light spreads through water but sunlight does not pass unattenuated, so
     // light decays with depth (deep water is dark).
     light: { lightPassesThrough: true, sunlightPassesThrough: false },
@@ -423,10 +477,26 @@ export const BLOCKS: readonly BlockDef[] = [
     // propagator can be observed (e.g. a lit radius inside a dark cave).
     light: { lightEmission: 15 },
   },
+  {
+    id: 29,
+    name: "Flowing Water",
+    tiles: uniform(T.WATER),
+    color: "#366ec4",
+    solid: false,
+    opaque: false,
+    transparent: true,
+    liquid: true,
+    liquidType: "flowing",
+    liquidDef: WATER_LIQUID_DEF,
+    // Same lighting behaviour as the source: light spreads through, sunlight
+    // does not pass unattenuated (deep water darkens).
+    light: { lightPassesThrough: true, sunlightPassesThrough: false },
+  },
 ];
 
 export const AIR_BLOCK = 0;
 export const WATER_BLOCK = 7;
+export const WATER_FLOWING_BLOCK = 29;
 export const CACTUS_BLOCK = 19;
 export const MUSHROOM_BLOCK = 23;
 
@@ -483,3 +553,59 @@ export function clampLight(v: number): number {
 }
 
 export { MAX_LIGHT };
+
+// ---------------------------------------------------------------------------
+// Liquid accessors (Minetest/Luanti-style). Level/depth is per-voxel: a source
+// is implicitly full (height = MAX_LIQUID_LEVEL + 1), a flowing node carries a
+// 1..MAX_LIQUID_LEVEL value, and non-liquids have height 0.
+// ---------------------------------------------------------------------------
+
+/** True if the block id is any liquid (source or flowing). */
+export function isLiquid(id: BlockId): boolean {
+  return getBlock(id).liquid;
+}
+
+/** True if the block id is a liquid source. */
+export function isLiquidSource(id: BlockId): boolean {
+  return getBlock(id).liquidType === "source";
+}
+
+/** True if the block id is a flowing liquid. */
+export function isLiquidFlowing(id: BlockId): boolean {
+  return getBlock(id).liquidType === "flowing";
+}
+
+/**
+ * "Head" of a liquid cell — a monotonic measure of how much liquid is present,
+ * used by the flow simulator to decide spread direction and decay.
+ *
+ *   source            → MAX_LIQUID_LEVEL + 1   (i.e. 8, "full")
+ *   flowing (level L) → L                       (1..7)
+ *   non-liquid        → 0
+ *
+ * Flowing water spreads to neighbours whose head is lower; each horizontal
+ * step decays by one. This mirrors Minetest's `LiquidData::level` semantics.
+ */
+export function liquidHeight(id: BlockId, level: number): number {
+  const def = getBlock(id);
+  if (def.liquidType === "source") return MAX_LIQUID_LEVEL + 1;
+  if (def.liquidType === "flowing") return level > 0 ? (level > MAX_LIQUID_LEVEL ? MAX_LIQUID_LEVEL : level) : 0;
+  return 0;
+}
+
+/** The shared `LiquidDef` for a liquid block id, or null for non-liquids. */
+export function liquidDefOf(id: BlockId): LiquidDef | null {
+  return getBlock(id).liquidDef ?? null;
+}
+
+/**
+ * Whether a liquid may flow INTO this block (Minetest `floodable`). Air and
+ * non-solid plantlike decorations are floodable; opaque solids and other
+ * liquids are not. Liquids never displace solid terrain.
+ */
+export function isFloodable(id: BlockId): boolean {
+  if (id === AIR_BLOCK) return true;
+  const def = getBlock(id);
+  if (def.liquid) return false; // don't displace other liquids
+  return !def.solid; // air-like or passable decoration (tall grass, flowers…)
+}

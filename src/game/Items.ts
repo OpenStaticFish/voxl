@@ -1,5 +1,5 @@
 import type { BlockId } from "../types";
-import { BLOCKS, WATER_BLOCK, MUSHROOM_BLOCK } from "./Blocks";
+import { BLOCKS, WATER_BLOCK, WATER_FLOWING_BLOCK, MUSHROOM_BLOCK } from "./Blocks";
 
 /**
  * Items generalize blocks: every non-air block becomes a placeable block item
@@ -129,6 +129,7 @@ type Hardness = "instant" | "soft" | "medium" | "unbreakable";
 const HARDNESS: Record<number, Hardness> = {
   8: "unbreakable", // bedrock
   [WATER_BLOCK]: "unbreakable", // fluids can't be punched away
+  [WATER_FLOWING_BLOCK]: "unbreakable", // flowing water likewise
   20: "instant", 21: "instant", 22: "instant", [MUSHROOM_BLOCK]: "instant", // plantlike
 };
 

@@ -38,6 +38,17 @@ function boot(): void {
     post?: (on?: boolean) => void;
     shadows?: (on?: boolean) => void;
     dumpMaterials?: () => void;
+    // Liquid system debug surface (see LiquidSimulator).
+    liquid?: () => unknown;
+    placeWater?: (x?: number, y?: number, z?: number) => void;
+    removeWater?: (x?: number, y?: number, z?: number) => void;
+    liquidBudget?: (n: number) => void;
+    // Water rendering / targeting debug toggles.
+    waterSides?: (on?: boolean) => void;
+    waterAnim?: (on?: boolean) => void;
+    waterDepth?: (on?: boolean) => void;
+    waterSimple?: (on?: boolean) => void;
+    targetLiquids?: (on?: boolean) => boolean;
   }
   (window as unknown as { __voxl?: VoxlAutomation }).__voxl = {
     beginPlay: () => game.beginPlay(),
@@ -62,6 +73,15 @@ function boot(): void {
     post: (on) => game._setPost(on ?? true),
     shadows: (on) => game._setShadows(on ?? true),
     dumpMaterials: () => game._dumpMaterials(),
+    liquid: () => game._liquidDebug(),
+    placeWater: (x, y, z) => game._placeWater(x, y, z),
+    removeWater: (x, y, z) => game._removeWater(x, y, z),
+    liquidBudget: (n) => game._liquidBudget(n),
+    waterSides: (on) => game._setWaterSides(on ?? true),
+    waterAnim: (on) => game._setWaterAnim(on ?? true),
+    waterDepth: (on) => game._setWaterDepth(on ?? true),
+    waterSimple: (on) => game._setWaterSimple(on ?? true),
+    targetLiquids: (on) => game._setTargetLiquids(on),
   };
 }
 

@@ -18,6 +18,8 @@ export interface PerfSnapshot {
   shadowCasters: number;
   shadowsEnabled: boolean;
   waterMeshes: number;
+  /** Total vertices across all water (transparent) meshes — fill/overdraw signal. */
+  waterVertices: number;
   preset: string;
   viewDistance: number;
   renderScale: number;
@@ -36,6 +38,23 @@ export interface PerfSnapshot {
   waterAlpha: number;
   waterQuality: string;
   antiAliasing: boolean;
+  // Liquid / swimming state.
+  inWater: boolean;
+  underwater: boolean;
+  liquidQueue: number;
+  liquidPriorityQueue: number;
+  liquidProcessed: number;
+  liquidBudget: number;
+  liquidWrites: number;
+  liquidMsSinceTick: number;
+  targetLiquidType: string;
+  targetLiquidLevel: number;
+  // Block targeting through water (Luanti-style pointability).
+  targetMode: "solids" | "liquids";
+  rayThroughLiquid: boolean;
+  firstLiquid: { x: number; y: number; z: number } | null;
+  waterSidesOn: boolean;
+  waterAnimOn: boolean;
 }
 
 function $(id: string): HTMLElement {
@@ -61,6 +80,8 @@ export class PerfOverlay {
   private readonly lightEl: HTMLElement;
   private readonly fogEl: HTMLElement;
   private readonly waterEl: HTMLElement;
+  private readonly liquidEl: HTMLElement;
+  private readonly targetEl: HTMLElement;
   private readonly memEl: HTMLElement;
   private visible = false;
 
@@ -95,6 +116,8 @@ export class PerfOverlay {
     this.lightEl = mkline(grid, "light");
     this.fogEl = mkline(grid, "fog");
     this.waterEl = mkline(grid, "water");
+    this.liquidEl = mkline(grid, "liquid");
+    this.targetEl = mkline(grid, "target");
     this.memEl = mkline(grid, "mem");
     root.appendChild(grid);
 
@@ -138,7 +161,20 @@ export class PerfOverlay {
       `amb ${s.ambientIntensity.toFixed(2)} · sun ${s.sunIntensity.toFixed(2)} · day ${s.dayFactor.toFixed(2)}`,
     );
     setLine(this.fogEl, `start ${Math.round(s.fogStart)} · end ${Math.round(s.fogEnd)}`);
-    setLine(this.waterEl, `${s.waterQuality} · alpha ${s.waterAlpha.toFixed(2)} · ${s.waterMeshes} water meshes`);
+    setLine(this.waterEl, `${s.waterQuality} · alpha ${s.waterAlpha.toFixed(2)} · ${s.waterMeshes} meshes · ${formatK(s.waterVertices)} verts`);
+    const liquidState =
+      (s.underwater ? "under" : s.inWater ? "in-water" : "dry") +
+      ` · tgt ${s.targetLiquidType}${s.targetLiquidType === "flowing" ? ` L${s.targetLiquidLevel}` : ""}`;
+    setLine(
+      this.liquidEl,
+      `q ${s.liquidQueue} (pri ${s.liquidPriorityQueue}) · ${s.liquidProcessed}/${s.liquidBudget}/tick · ${s.liquidMsSinceTick.toFixed(0)}ms · ${formatK(s.liquidWrites)} writes · ${liquidState}`,
+      s.liquidMsSinceTick > 300 ? "var(--danger)" : s.liquidMsSinceTick > 150 ? "var(--warm)" : "",
+    );
+    const fl = s.firstLiquid;
+    setLine(
+      this.targetEl,
+      `${s.targetMode} · ${s.rayThroughLiquid ? "through water" : "no water in ray"}${fl ? ` · 1st liq ${fl.x},${fl.y},${fl.z}` : ""} · sides ${s.waterSidesOn ? "on" : "off"} · anim ${s.waterAnimOn ? "on" : "off"}`,
+    );
     const tod = `t ${Math.floor(s.timeOfDay * 24).toString().padStart(2, "0")}:${Math.floor(((s.timeOfDay * 24) % 1) * 60).toString().padStart(2, "0")}`;
     if (s.heapUsedMB !== null) {
       setLine(this.memEl, `${s.heapUsedMB.toFixed(0)} MB JS · ${tod}${s.gpuRenderer ? " · " + s.gpuRenderer : ""}`);
