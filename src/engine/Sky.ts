@@ -126,6 +126,22 @@ export class Sky {
     this.clouds.setEnabled(enabled);
   }
 
+  /** Push the day/night brightness factor to the cloud layer. */
+  setCloudDayFactor(dayFactor: number): void {
+    this.clouds.setDayFactor(dayFactor);
+  }
+
+  /**
+   * Apply the cloud quality tier in one call:
+   *   enabled = false → clouds off entirely
+   *   enabled = true, simple = true → simple tier (top faces skipped)
+   *   enabled = true, simple = false → full fancy clouds
+   */
+  setClouds(enabled: boolean, simple: boolean): void {
+    this.clouds.setEnabled(enabled);
+    this.clouds.setSimple(enabled && simple);
+  }
+
   setCloudSeed(seed: string): void {
     this.clouds.setSeed(seed);
   }

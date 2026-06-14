@@ -31,6 +31,8 @@ export class LightingSystem {
   private readonly world: World;
   private readonly sky: Sky;
   private readonly scene: Scene;
+  /** Accumulated wall-clock seconds, used to drive the water animation. */
+  private elapsed = 0;
 
   constructor(world: World, sky: Sky, scene: Scene) {
     this.world = world;
@@ -54,17 +56,27 @@ export class LightingSystem {
     // Visuals: sun/moon discs + sky dome gradient.
     this.celestial.update(cameraPosition, dn);
     this.sky.setDomeColours(dn.skyZenith, dn.skyHorizon);
+    // Clouds are unlit, so push the day/night factor so they dim at night.
+    this.sky.setCloudDayFactor(dn.dayFactor);
 
     // Terrain shader uniforms: sun channel × dayFactor (+ moonlight floor),
-    // block channel untouched. Fog tracks the horizon colour.
+    // block channel untouched. Fog tracks the horizon colour. Pushed to BOTH the
+    // opaque and cutout terrain materials so the two passes stay in lock-step.
     const fogColor: Color3 = dn.skyHorizon;
-    this.world.terrainMaterial.setDayNight(dn.dayFactor, dn.moonFactor);
-    this.world.terrainMaterial.setFog(
+    this.world.setTerrainDayNight(dn.dayFactor, dn.moonFactor);
+    this.world.setTerrainFog(
       cameraPosition,
       fogColor,
       this.scene.fogStart,
       this.scene.fogEnd,
     );
+
+    // Water shader uniforms mirror the terrain so the two surfaces stay in sync
+    // through the day/night cycle, plus an advancing animation clock.
+    this.elapsed += dt;
+    this.world.waterShader.setDayNight(dn.dayFactor, dn.moonFactor);
+    this.world.waterShader.setFog(cameraPosition, fogColor, this.scene.fogStart, this.scene.fogEnd);
+    this.world.waterShader.setTime(this.elapsed);
 
     // Shadows are dormant unless explicitly enabled (terrain uses voxel sunlight).
     this.shadows.update(playerX, playerY, playerZ);

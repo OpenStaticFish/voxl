@@ -306,7 +306,7 @@ export function buildChunkGeometry(
           const isWaterTop = def.liquid && n[1] === 1;
           // Water keeps a single scalar brightness; opaque/cutout bake two
           // light channels for the VoxelTerrainMaterial shader.
-          pushFace(builder, f, wx, wy, wz, def.tiles[f], sample, !def.liquid, isWaterTop);
+          pushFace(builder, f, wx, wy, wz, def.tiles[f], sample, true, isWaterTop);
         }
       }
     }

@@ -124,6 +124,28 @@ export class ShadowManager {
     }
   }
 
+  /**
+   * Reconfigure shadow quality at runtime. Merges a partial config, then either
+   * tears down the generator (disabled), builds it (newly enabled), or rebuilds
+   * it (quality params like mapSize/casterRadius/blur changed). Safe to call
+   * repeatedly — no-op when the generator is already gone and disabled.
+   */
+  configure(patch: Partial<ShadowConfig>): void {
+    Object.assign(this.config, patch);
+    const wantEnabled = this.config.enabled;
+    const hasGen = this.generator !== null;
+    if (!wantEnabled) {
+      if (hasGen) {
+        this.dispose();
+        this.config.enabled = false;
+      }
+      return;
+    }
+    // wantEnabled === true: ensure a correctly-configured generator exists.
+    if (hasGen) this.dispose();
+    this.setup();
+  }
+
   /** Toggle and return the new enabled state. */
   toggle(): boolean {
     this.setEnabled(!this.enabled);
@@ -132,6 +154,11 @@ export class ShadowManager {
 
   get enabled(): boolean {
     return this.generator !== null;
+  }
+
+  /** Number of meshes currently in the shadow render list (perf overlay). */
+  get casterCount(): number {
+    return this.casters.length;
   }
 
   /**

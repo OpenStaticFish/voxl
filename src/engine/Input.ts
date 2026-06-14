@@ -108,6 +108,7 @@ export class Input {
       return;
     }
     if (e.code === "Space") e.preventDefault();
+    if (e.code === "F3") e.preventDefault(); // dev perf overlay (avoid browser find-bar)
     if (!e.repeat) {
       this.onKey?.(e.code, true);
       if (e.code === "Space") {

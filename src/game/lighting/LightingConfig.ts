@@ -13,9 +13,13 @@ export const LIGHT_MAX = MAX_LIGHT;
  * between. Matches the Minetest/Minecraft "ambient occlusion by face normal"
  * convention and gives cube edges readable definition.
  *
+ * The spread is deliberately wide (top 1.0 → bottom 0.45, sides ~0.78/0.82) so
+ * terrain reads with clear depth and overhangs/caves stay visibly darker,
+ * instead of the uniformly-lit "flat" look a tighter spread produces.
+ *
  * Index order matches FACE in Blocks.ts: [PX, NX, PY, NY, PZ, NZ].
  */
-export const FACE_SHADE = [0.8, 0.8, 1.0, 0.5, 0.86, 0.86] as const;
+export const FACE_SHADE = [0.76, 0.76, 1.0, 0.45, 0.82, 0.82] as const;
 
 /** Brightness multiplier for plantlike (X-cross) decorations. */
 export const PLANT_SHADE = 0.95;

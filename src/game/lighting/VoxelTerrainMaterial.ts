@@ -72,6 +72,14 @@ export interface VoxelTerrainMaterialOptions {
   texture: Texture;
   /** Alpha-test threshold. Use ~0.5 for cutout pass, 0.0 (disabled) for opaque. */
   alphaCutOff?: number;
+  /**
+   * Whether to render double-sided. The CUTOUT pass (plant crosses) must be
+   * double-sided (you see both sides of a cross). The OPAQUE pass should cull
+   * back faces — the mesher winds cube faces CCW-outward, so back-face culling
+   * keeps the visible exterior and discards the invisible interior, roughly
+   * halving fragment work on terrain. Default false (culling ON).
+   */
+  doubleSided?: boolean;
 }
 
 /**
@@ -129,9 +137,11 @@ export class VoxelTerrainMaterial {
     mat.setFloat("uFogStart", 60);
     mat.setFloat("uFogEnd", 220);
     mat.setVector3("uCameraPos", new Vector3(0, 0, 0));
-    // Match the prior StandardMaterial flags: double-sided, opaque (alpha-test
-    // via `discard`, not blending) so the atlas works for both cube and plant faces.
-    mat.backFaceCulling = false;
+    // Back-face culling: ON for opaque cube terrain (mesher winds faces
+    // CCW-outward, so culling discards the invisible interior — a large fragment
+    // saving). OFF (double-sided) for the cutout pass so plant crosses show from
+    // both sides.
+    mat.backFaceCulling = !(options.doubleSided ?? false);
     mat.options.needAlphaBlending = false;
     // We compute fog manually (uFogColor/uFogStart/uFogEnd + uCameraPos). Disable
     // Babylon's fog pipeline on this material — otherwise it injects its fog

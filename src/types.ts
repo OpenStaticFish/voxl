@@ -1,5 +1,14 @@
 // Shared type definitions for VOXL.
 
+import type {
+  GraphicsSettings,
+  GraphicsPreset,
+  ShadowQuality,
+  WaterQuality,
+  FoliageDensity,
+  CloudsQuality,
+} from "./game/graphics/GraphicsSettings";
+
 /** Numeric block id. 0 = air. See Blocks.ts for the registry. */
 export type BlockId = number;
 
@@ -33,11 +42,22 @@ export interface Settings {
   mouseSensitivity: number; // multiplier
   fov: number; // degrees
   showFps: boolean;
-  clouds: boolean;
   seed: string;
   /** Survival vs creative game mode (global preference; saved per-world too). */
   mode: "survival" | "creative";
+  /** Scalable graphics configuration (presets + individual toggles). */
+  graphics: GraphicsSettings;
 }
+
+// Re-exported here so the rest of the app imports graphics types from one place.
+export type {
+  GraphicsPreset,
+  ShadowQuality,
+  WaterQuality,
+  FoliageDensity,
+  CloudsQuality,
+  GraphicsSettings,
+};
 
 /** Result of a voxel DDA raycast. */
 export interface RaycastHit {

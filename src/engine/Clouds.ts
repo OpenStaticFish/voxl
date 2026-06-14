@@ -55,6 +55,13 @@ export class Clouds {
   private lastCenterZ = Infinity;
 
   private enabled = true;
+  /**
+   * "Simple" tier skips the cloud TOP faces — the player is almost always below
+   * the cloud layer (CLOUD_HEIGHT=130 vs player ~y=40) so tops are rarely seen,
+   * and culling them roughly halves the cloud triangle count. Toggled by the
+   * graphics settings (simple vs fancy clouds).
+   */
+  private simple = false;
 
   // Preallocated geometry buffers, reused across rebuilds (no per-build GC).
   // RGBA colors (4 floats/vertex) — required by Babylon's vertex-color path.
@@ -74,7 +81,7 @@ export class Clouds {
     this.scene = scene;
     this.noise = new Noise(seed || "voxl");
 
-    this.cTop = Color3.FromHexString("#ffffff");
+    this.cTop = Color3.FromHexString("#e2eaf2"); // soft cool white, not pure #ffffff
     // side1 (N/S walls) and side2 (E/W walls) get progressively more shadow,
     // bottom gets full shadow — gives the slabs simple directional depth.
     this.cSide1 = SHADOW.scale(0.25).add(new Color3(0.75, 0.75, 0.75));
@@ -123,6 +130,17 @@ export class Clouds {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
     this.mesh.setEnabled(enabled);
+  }
+
+  /**
+   * Toggle the simple tier (skips cloud top faces for ~half the triangles).
+   * Forces a rebuild so the change is immediate rather than waiting for drift.
+   */
+  setSimple(simple: boolean): void {
+    if (this.simple === simple) return;
+    this.simple = simple;
+    this.lastCenterX = Infinity;
+    this.lastCenterZ = Infinity;
   }
 
   setSeed(seed: string): void {
@@ -233,8 +251,9 @@ export class Clouds {
         const filledW = inArea(xi - 1, zi) && grid[gi(xi - 1, zi)] === 1;
 
         // Top and bottom faces (DoubleSide + flat shading via vertex colours,
-        // so winding is irrelevant here).
-        addQuad(x0, top, z1, x1, top, z1, x1, top, z0, x0, top, z0, this.cTop);
+        // so winding is irrelevant here). Simple tier skips tops — the player is
+        // below the layer and the tops are almost never visible.
+        if (!this.simple) addQuad(x0, top, z1, x1, top, z1, x1, top, z0, x0, top, z0, this.cTop);
         addQuad(x0, bot, z0, x1, bot, z0, x1, bot, z1, x0, bot, z1, this.cBottom);
 
         // Side walls only where the neighbour is open (Minetest-style culling).
@@ -265,6 +284,18 @@ export class Clouds {
     this.material.setColor3("fogColor", color);
     this.material.setVector2("fogRange", new Vector2(start, end));
     this.material.setVector3("cameraPos", cameraPos);
+  }
+
+  /**
+   * Apply a day/night brightness factor to the cloud layer (0..1). Clouds are
+   * otherwise unlit vertex colours, so without this they'd glow white at night.
+   * Pushed each frame by the lighting system via Sky.
+   */
+  setDayFactor(dayFactor: number): void {
+    // Bright at midday (1.0), dim but not black at midnight (~0.32) so clouds
+    // read as grey shapes against the night sky.
+    const light = 0.32 + 0.68 * dayFactor;
+    this.material.setFloat("uCloudLight", light);
   }
 
   dispose(): void {
@@ -306,19 +337,24 @@ function makeCloudMaterial(scene: Scene): ShaderMaterial {
         uniform vec3 fogColor;
         uniform vec2 fogRange;
         uniform vec3 cameraPos;
+        uniform float uCloudLight;
         void main() {
           float dist = length(vPositionW - cameraPos);
           float fog = clamp((fogRange.y - dist) / (fogRange.y - fogRange.x), 0.0, 1.0);
-          vec3 col = mix(fogColor, vColor.rgb, fog);
+          // Clouds are unlit by the voxel system, so apply a day/night brightness
+          // factor here so they dim to grey at night instead of glowing white.
+          vec3 lit = vColor.rgb * uCloudLight;
+          vec3 col = mix(fogColor, lit, fog);
           gl_FragColor = vec4(col, vColor.a);
         }
       `,
     },
     {
       attributes: ["position", "color"],
-      uniforms: ["world", "worldViewProjection", "fogColor", "fogRange", "cameraPos"],
+      uniforms: ["world", "worldViewProjection", "fogColor", "fogRange", "cameraPos", "uCloudLight"],
     },
   );
   material.backFaceCulling = false;
+  material.setFloat("uCloudLight", 1.0);
   return material;
 }

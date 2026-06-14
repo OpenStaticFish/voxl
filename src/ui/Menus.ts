@@ -1,8 +1,15 @@
 import type { Settings } from "../types";
+import type {
+  CloudsQuality,
+  FoliageDensity,
+  GraphicsPreset,
+  ShadowQuality,
+  WaterQuality,
+} from "../game/graphics/GraphicsSettings";
 import { ScreenManager } from "./ScreenManager";
 
-function $(id: string): HTMLInputElement | HTMLElement {
-  return document.getElementById(id) as HTMLInputElement | HTMLElement;
+function $(id: string): HTMLInputElement | HTMLSelectElement | HTMLElement {
+  return document.getElementById(id) as HTMLInputElement | HTMLSelectElement | HTMLElement;
 }
 
 /**
@@ -15,6 +22,8 @@ export class Menus {
   onResume?: () => void;
   onQuit?: () => void;
   onSettingsChange?: (patch: Partial<Settings>) => void;
+  /** Apply a built-in graphics preset (low/medium/high). */
+  onGraphicsPreset?: (preset: GraphicsPreset) => void;
   onRegenerate?: (seed: string) => void;
 
   private current: Settings;
@@ -22,13 +31,13 @@ export class Menus {
 
   constructor(screens: ScreenManager, initial: Settings) {
     this.screens = screens;
-    this.current = { ...initial };
+    this.current = { ...initial, graphics: { ...initial.graphics } };
     this.bind();
     this.syncInputs();
   }
 
   updateCurrent(settings: Settings): void {
-    this.current = { ...settings };
+    this.current = { ...settings, graphics: { ...settings.graphics } };
     this.syncInputs();
   }
 
@@ -58,7 +67,7 @@ export class Menus {
       el.addEventListener("click", () => this.back());
     });
 
-    // --- Settings controls ---
+    // --- General settings ---
     const vd = $("set-viewdistance") as HTMLInputElement;
     const vdOut = $("out-viewdistance");
     vd.addEventListener("input", () => {
@@ -83,9 +92,34 @@ export class Menus {
     const fps = $("set-fps") as HTMLInputElement;
     fps.addEventListener("change", () => this.emit({ showFps: fps.checked }));
 
-    const clouds = $("set-clouds") as HTMLInputElement;
-    clouds.addEventListener("change", () => this.emit({ clouds: clouds.checked }));
+    // --- Graphics presets ---
+    document.querySelectorAll<HTMLButtonElement>("[data-preset]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const preset = btn.dataset.preset as GraphicsPreset;
+        this.onGraphicsPreset?.(preset);
+      });
+    });
 
+    // --- Graphics individual controls ---
+    const rs = $("set-renderscale") as HTMLSelectElement;
+    rs.addEventListener("change", () => this.patchGraphics({ renderScale: Number(rs.value) }));
+
+    const shadows = $("set-shadows") as HTMLSelectElement;
+    shadows.addEventListener("change", () => this.patchGraphics({ shadows: shadows.value as ShadowQuality }));
+
+    const water = $("set-water") as HTMLSelectElement;
+    water.addEventListener("change", () => this.patchGraphics({ water: water.value as WaterQuality }));
+
+    const foliage = $("set-foliage") as HTMLSelectElement;
+    foliage.addEventListener("change", () => this.patchGraphics({ foliage: foliage.value as FoliageDensity }));
+
+    const clouds = $("set-clouds2") as HTMLSelectElement;
+    clouds.addEventListener("change", () => this.patchGraphics({ clouds: clouds.value as CloudsQuality }));
+
+    const aa = $("set-aa") as HTMLInputElement;
+    aa.addEventListener("change", () => this.patchGraphics({ antiAliasing: aa.checked }));
+
+    // --- Seed / regenerate ---
     const seed = $("set-seed") as HTMLInputElement;
     $("btn-regen").addEventListener("click", () => {
       const value = seed.value.trim() || "voxl";
@@ -93,8 +127,23 @@ export class Menus {
     });
   }
 
+  /**
+   * Apply a single graphics field change. Any individual tweak switches the
+   * preset to "custom" (so the preset buttons no longer highlight a built-in).
+   */
+  private patchGraphics(
+    partial: Partial<Settings["graphics"]>,
+  ): void {
+    const graphics = { ...this.current.graphics, ...partial, preset: "custom" as const };
+    this.emit({ graphics });
+  }
+
   private emit(patch: Partial<Settings>): void {
-    this.current = { ...this.current, ...patch };
+    this.current = {
+      ...this.current,
+      ...patch,
+      graphics: patch.graphics ? { ...patch.graphics } : this.current.graphics,
+    };
     this.onSettingsChange?.(patch);
   }
 
@@ -110,7 +159,21 @@ export class Menus {
     fov.value = String(s.fov);
     ($("out-fov")).textContent = String(s.fov);
     ($("set-fps") as HTMLInputElement).checked = s.showFps;
-    ($("set-clouds") as HTMLInputElement).checked = s.clouds;
     ($("set-seed") as HTMLInputElement).value = s.seed;
+
+    // Graphics
+    const g = s.graphics;
+    ($("set-renderscale") as HTMLSelectElement).value = String(g.renderScale);
+    ($("set-shadows") as HTMLSelectElement).value = g.shadows;
+    ($("set-water") as HTMLSelectElement).value = g.water;
+    ($("set-foliage") as HTMLSelectElement).value = g.foliage;
+    ($("set-clouds2") as HTMLSelectElement).value = g.clouds;
+    ($("set-aa") as HTMLInputElement).checked = g.antiAliasing;
+
+    // Highlight the active preset button (or none for "custom").
+    document.querySelectorAll<HTMLButtonElement>("[data-preset]").forEach((btn) => {
+      const active = btn.dataset.preset === g.preset;
+      btn.classList.toggle("btn-preset-active", active);
+    });
   }
 }

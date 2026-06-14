@@ -1,11 +1,12 @@
 import {
+  AbstractMesh,
   Color3,
   Material,
   Mesh,
   Scene,
-  StandardMaterial,
   Texture,
   TransformNode,
+  Vector3,
   VertexData,
 } from "@babylonjs/core";
 import { CHUNK_SIZE, CHUNK_HEIGHT, MAX_CHUNK_GEN_PER_FRAME, MAX_CHUNK_MESH_PER_FRAME } from "../constants";
@@ -15,12 +16,15 @@ import { buildChunkGeometry } from "./ChunkMesher";
 import { TerrainGenerator, findGroundY } from "./TerrainGenerator";
 import { VoxelLightEngine, lightKey } from "./lighting/VoxelLightEngine";
 import { VoxelTerrainMaterial } from "./lighting/VoxelTerrainMaterial";
+import { WaterMaterial } from "./lighting/WaterMaterial";
 import {
   LIGHT_MAX,
   MAX_CHUNK_LIGHT_PER_FRAME,
   lightToBrightness,
   type LightDebugMode,
 } from "./lighting/LightingConfig";
+import type { FoliageDensity, WaterQuality } from "./graphics/GraphicsSettings";
+import { dbg } from "../state/Debug";
 
 function key(cx: number, cz: number): string {
   return `${cx},${cz}`;
@@ -40,12 +44,17 @@ interface ChunkMeshes {
 export class World {
   readonly root: TransformNode;
   /**
-   * Opaque + cutout terrain use a custom two-channel shader (sun channel ×
-   * dayFactor, block channel unaffected by night) so the day/night cycle never
-   * forces a chunk remesh. Water stays on a plain StandardMaterial.
+   * Two terrain material instances sharing one shader, differing only in
+   * back-face culling:
+   *   - {@link terrainOpaque} culls back faces (the bulk of terrain — saves
+   *     drawing every cube's invisible interior).
+   *   - {@link terrainCutout} is double-sided (plant crosses need both sides).
+   * Day/night + fog + debug uniforms are forwarded to BOTH each frame.
    */
-  readonly terrainMaterial: VoxelTerrainMaterial;
-  readonly waterMaterial: StandardMaterial;
+  readonly terrainOpaque: VoxelTerrainMaterial;
+  readonly terrainCutout: VoxelTerrainMaterial;
+  /** Animated water shader (shared). {@link waterMaterial} exposes the raw material. */
+  readonly waterShader: WaterMaterial;
   readonly generator: TerrainGenerator;
   /** Atlas must have hasAlpha=true for the cutout pass to alpha-test. */
   readonly atlasHasAlpha: boolean;
@@ -62,6 +71,32 @@ export class World {
   /** Active light debug overlay (applied as a material uniform — no remesh). */
   private lightDebugMode: LightDebugMode = "off";
 
+  /**
+   * Debug: when false, all water (transparent) meshes are hidden. Use to
+   * confirm whether a suspect patch is the water layer. Read at mesh creation;
+   * toggling also updates existing meshes via {@link setWaterEnabled}.
+   */
+  private waterEnabled = true;
+
+  /**
+   * Debug: when true, all chunk meshes get `alwaysSelectAsActiveMesh = true` so
+   * Babylon never frustum-culls them — useful to confirm whether missing terrain
+   * is a culling issue. Read at mesh creation; toggling also updates existing
+   * meshes via {@link setRenderAllChunks}.
+   */
+  private forceRenderAll = false;
+
+  // --- Graphics-quality state (driven by GraphicsController, render-time only;
+  //     never changes world generation, so worlds stay deterministic). ---
+  /** Current water quality tier. */
+  private waterQuality: WaterQuality = "medium";
+  /**
+   * Max distance (blocks) at which plantlike (cutout) meshes are drawn. Beyond
+   * this, chunk cutout meshes are hidden to save fill/cutout-fragment cost.
+   * Foliage density is controlled purely at draw time (no generation change).
+   */
+  private foliageCutoutDistance = Infinity;
+
   constructor(seed: string, atlas: Texture, scene: Scene) {
     this.scene = scene;
     this.root = new TransformNode("world-root", scene);
@@ -75,21 +110,48 @@ export class World {
     // instance: opaque tiles have alpha=1 (never discarded), plant tiles have
     // alpha=0 backgrounds (discarded by the alpha test), so a single 0.5 cutoff
     // handles both cube faces and the plantlike X-cross.
-    this.terrainMaterial = new VoxelTerrainMaterial(scene, { texture: atlas, alphaCutOff: 0.5 });
+    // Two terrain material instances sharing one shader. NOTE: both are
+    // DOUBLE-SIDED (back-face culling OFF). A previous change enabled culling on
+    // the opaque pass for fragment savings, but this scene's face winding does
+    // NOT match Babylon's front-face convention, so culling removed visible
+    // faces and produced massive sky-coloured holes through the terrain.
+    // Culling is therefore OFF until the winding is explicitly verified; a debug
+    // toggle (`__voxl.terrainCulling(on)`) lets you experiment safely.
+    this.terrainOpaque = new VoxelTerrainMaterial(scene, { texture: atlas, alphaCutOff: 0.5, doubleSided: true });
+    this.terrainCutout = new VoxelTerrainMaterial(scene, { texture: atlas, alphaCutOff: 0.5, doubleSided: true });
 
-    // Transparent pass: water (alpha-blended, no depth write, double-sided).
-    this.waterMaterial = new StandardMaterial("voxel-water", scene);
-    this.waterMaterial.diffuseTexture = atlas;
-    this.waterMaterial.specularColor = new Color3(0, 0, 0);
-    this.waterMaterial.alpha = 0.72;
-    this.waterMaterial.backFaceCulling = false;
-    this.waterMaterial.disableDepthWrite = true;
-    this.waterMaterial.transparencyMode = Material.MATERIAL_ALPHABLEND;
+    // Transparent pass: animated water shader (alpha-blended, no depth write,
+    // double-sided). Day/night + fog are pushed each frame by LightingSystem.
+    this.waterShader = new WaterMaterial(scene, { texture: atlas });
   }
 
-  /** The opaque + cutout ShaderMaterial (shared). */
-  get opaqueMaterial(): Material { return this.terrainMaterial.material; }
-  get cutoutMaterial(): Material { return this.terrainMaterial.material; }
+  /** The opaque ShaderMaterial (shared, back-face culled). */
+  get opaqueMaterial(): Material { return this.terrainOpaque.material; }
+  /** The cutout ShaderMaterial (shared, double-sided for plant crosses). */
+  get cutoutMaterial(): Material { return this.terrainCutout.material; }
+  /** The raw water Babylon material (shared). */
+  get waterMaterial(): Material { return this.waterShader.material; }
+
+  // -- Terrain lighting/debug forwarding: push uniforms to BOTH terrain
+  //    materials so the opaque + cutout passes stay in lock-step. --
+
+  /** Live day/night state for both terrain passes (call every frame). */
+  setTerrainDayNight(dayFactor: number, moonFloor: number): void {
+    this.terrainOpaque.setDayNight(dayFactor, moonFloor);
+    this.terrainCutout.setDayNight(dayFactor, moonFloor);
+  }
+
+  /** Fog + camera for both terrain passes (call every frame). */
+  setTerrainFog(cameraPosition: Vector3, color: Color3, start: number, end: number): void {
+    this.terrainOpaque.setFog(cameraPosition, color, start, end);
+    this.terrainCutout.setFog(cameraPosition, color, start, end);
+  }
+
+  /** Debug overlay mode for both terrain passes (no remesh). */
+  private setTerrainDebugMode(code: number, tint: Color3): void {
+    this.terrainOpaque.setDebugMode(code, tint);
+    this.terrainCutout.setDebugMode(code, tint);
+  }
 
   private spiral(radius: number): Array<{ dx: number; dz: number; d: number }> {
     const cached = this.spiralCache.get(radius);
@@ -232,7 +294,7 @@ export class World {
       mode === "sun" ? new Color3(1.0, 0.85, 0.4) :
       mode === "block" ? new Color3(1.0, 0.7, 0.35) :
       new Color3(1, 1, 1);
-    this.terrainMaterial.setDebugMode(code, tint);
+    this.setTerrainDebugMode(code, tint);
   }
 
   getLightDebugMode(): LightDebugMode {
@@ -242,6 +304,55 @@ export class World {
   /** Number of chunks queued for re-lighting (debug overlay). */
   get lightDirtyCount(): number {
     return this.lightDirty.size;
+  }
+
+  /** Set the water quality tier (applied to the shared water material). */
+  setWaterQuality(quality: WaterQuality): void {
+    this.waterQuality = quality;
+    this.applyWaterQuality();
+  }
+
+  get currentWaterQuality(): WaterQuality {
+    return this.waterQuality;
+  }
+
+  /**
+   * Apply the water tier to the shared water material. Centralised so the water
+   * upgrade and a world recreate both call it. The full animated shader is
+   * layered on top in the water-rendering pass; here we keep a sensible baseline
+   * on the existing material so all tiers render correctly from the start.
+   */
+  private applyWaterQuality(): void {
+    this.waterShader.setQuality(this.waterQuality);
+  }
+
+  /** Set the foliage (cutout) render-distance tier. Draw-time only. */
+  setFoliageDensity(density: FoliageDensity): void {
+    this.foliageCutoutDistance = density === "low" ? 48 : density === "medium" ? 96 : Infinity;
+  }
+
+  /**
+   * Snapshot of chunk streaming state for the performance overlay. `active` is
+   * the set of meshes Babylon considers visible this frame (from
+   * scene.getActiveMeshes()); we count a chunk as visible if any of its meshes
+   * is in that set.
+   */
+  chunkStats(active: Set<AbstractMesh>): { loaded: number; meshed: number; dirty: number; visible: number } {
+    let meshed = 0;
+    let visible = 0;
+    let dirty = 0;
+    for (const entry of this.meshes.values()) {
+      if (entry.opaque || entry.cutout || entry.transparent) meshed++;
+      if (
+        (entry.opaque !== undefined && active.has(entry.opaque)) ||
+        (entry.cutout !== undefined && active.has(entry.cutout)) ||
+        (entry.transparent !== undefined && active.has(entry.transparent))
+      ) {
+        visible++;
+      }
+    }
+    for (const chunk of this.chunks.values()) if (chunk.dirty) dirty++;
+    return { loaded: this.chunks.size, meshed, dirty, visible };
   }
 
   /** Highest non-air, non-water block at a column (for spawn placement). */
@@ -272,14 +383,28 @@ export class World {
     return chunk;
   }
 
-  /** Per-frame streaming: generate + mesh chunks around the player. */
-  update(playerX: number, playerZ: number, viewDistance: number): void {
+  /**
+   * Per-frame streaming: generate + mesh chunks around the player.
+   *
+   * `frameMs` (last frame time) drives adaptive budgets: when the frame is
+   * healthy we allow extra catch-up work, when it stutters we throttle to the
+   * minimum so chunk gen/remesh never compounds a frame spike. This keeps frame
+   * pacing stable while flying across chunk boundaries.
+   */
+  update(playerX: number, playerZ: number, viewDistance: number, frameMs = 16): void {
     const pcx = Math.floor(playerX / CHUNK_SIZE);
     const pcz = Math.floor(playerZ / CHUNK_SIZE);
     const order = this.spiral(viewDistance);
 
-    let genBudget = MAX_CHUNK_GEN_PER_FRAME;
-    let meshBudget = MAX_CHUNK_MESH_PER_FRAME;
+    // Adaptive budget factor from the last frame time:
+    //   ≤16ms (60fps): 1.5× — catch up faster when there's headroom
+    //   ≤22ms (~45fps): 1.0× — baseline
+    //   ≤35ms (~28fps): 0.5× — ease off
+    //   >35ms:          0.25× — barely trickle, don't add to the stall
+    const f = frameMs <= 16 ? 1.5 : frameMs <= 22 ? 1 : frameMs <= 35 ? 0.5 : 0.25;
+    let genBudget = Math.max(1, Math.round(MAX_CHUNK_GEN_PER_FRAME * f));
+    let meshBudget = Math.max(1, Math.round(MAX_CHUNK_MESH_PER_FRAME * f));
+    const lightBudget = Math.max(1, Math.round(MAX_CHUNK_LIGHT_PER_FRAME * f));
 
     // Generate missing chunks (closest first), respecting the budget.
     for (const off of order) {
@@ -307,7 +432,7 @@ export class World {
 
     // Propagate queued light updates (closest-first budget) BEFORE meshing so
     // meshes always read fresh light values.
-    this.processLightDirty(MAX_CHUNK_LIGHT_PER_FRAME);
+    this.processLightDirty(lightBudget);
 
     // Mesh dirty chunks (closest first), respecting the budget.
     for (const off of order) {
@@ -334,6 +459,29 @@ export class World {
         this.lightDirty.delete(k);
       }
     }
+
+    // Foliage (cutout) render-distance cull: hide plantlike meshes beyond the
+    // configured distance so grass/flowers don't cost fill rate at range. This
+    // is a draw-time decision only — chunks stay fully generated/deterministic.
+    const cutDist = this.foliageCutoutDistance;
+    if (cutDist !== Infinity) {
+      const cutSq = cutDist * cutDist;
+      for (const [mk, entry] of this.meshes) {
+        const m = entry.cutout;
+        if (!m) continue;
+        const comma = mk.indexOf(",");
+        const cx = parseInt(mk.slice(0, comma), 10);
+        const cz = parseInt(mk.slice(comma + 1), 10);
+        const dx = cx * 16 + 8 - playerX;
+        const dz = cz * 16 + 8 - playerZ;
+        m.setEnabled(dx * dx + dz * dz <= cutSq);
+      }
+    } else {
+      // Ensure all cutout meshes are enabled when set back to full distance.
+      for (const entry of this.meshes.values()) {
+        if (entry.cutout && !entry.cutout.isEnabled()) entry.cutout.setEnabled(true);
+      }
+    }
   }
 
   private rebuildMesh(chunk: Chunk): void {
@@ -344,6 +492,20 @@ export class World {
     );
     const k = key(chunk.cx, chunk.cz);
     const existing = this.meshes.get(k);
+    dbg(
+      "rebuildMesh",
+      k,
+      "opaque=" + (result.opaque ? "y" : "n"),
+      "cutout=" + (result.cutout ? "y" : "n"),
+      "water=" + (result.transparent ? "y" : "n"),
+    );
+
+    // The water (transparent) pass uses a StandardMaterial with a UNIFORM blue
+    // tint + scene lights/fog. Strip its baked vertex colours so per-chunk
+    // voxel-light values can't modulate the surface — otherwise relight
+    // differences between neighbouring chunks show up as a grid of seams across
+    // a lake. With no colour kind, the material supplies one continuous tint.
+    if (result.transparent) result.transparent.colors = null;
 
     // Opaque
     this.applyMesh(k, "opaque", result.opaque, this.opaqueMaterial, existing);
@@ -369,6 +531,7 @@ export class World {
     }
     const prev = entry[slot];
     if (prev) {
+      dbg("disposeMesh", slot, k);
       prev.dispose();
       entry[slot] = undefined;
     }
@@ -381,6 +544,22 @@ export class World {
       // alpha-blended. Either way, nothing here receives Babylon shadow maps.
       mesh.receiveShadows = false;
       vd.applyToMesh(mesh, false);
+      // Debug: optionally bypass frustum culling for every chunk mesh.
+      mesh.alwaysSelectAsActiveMesh = this.forceRenderAll;
+      // The water (transparent) pass uses a StandardMaterial with a uniform blue
+      // tint; disable the mesh's baked vertex colours so they can't darken it.
+      if (slot === "transparent") {
+        mesh.useVertexColors = false;
+        mesh.setEnabled(this.waterEnabled);
+      }
+      // Chunk geometry lives in world space (vertices include the chunk origin)
+      // and the world root never moves, so the world matrix is constant. Freeze
+      // it once: Babylon skips the per-frame parent×local matrix multiply for
+      // every static chunk mesh — a large saving with hundreds of chunks.
+      mesh.freezeWorldMatrix();
+      // Cutout (plantlike) passes only the alpha-test path; it never casts the
+      // kind of shadow worth paying for, so keep it out of shadow render lists.
+      if (slot === "cutout") mesh.receiveShadows = false;
       entry[slot] = mesh;
     }
   }
@@ -400,6 +579,56 @@ export class World {
     }
   }
 
+  /**
+   * Iterate every loaded chunk's grid coordinates (regardless of mesh state).
+   * Used by the chunk-border debug overlay to show the loaded-chunk footprint.
+   */
+  forEachChunkCoord(cb: (cx: number, cz: number) => void): void {
+    for (const chunk of this.chunks.values()) cb(chunk.cx, chunk.cz);
+  }
+
+  /**
+   * Debug: toggle forced rendering of every chunk mesh (bypass frustum culling).
+   * Updates existing meshes and the flag read at mesh creation.
+   */
+  setRenderAllChunks(on: boolean): void {
+    this.forceRenderAll = on;
+    for (const entry of this.meshes.values()) {
+      for (const slot of ["opaque", "cutout", "transparent"] as const) {
+        const m = entry[slot];
+        if (m) m.alwaysSelectAsActiveMesh = on;
+      }
+    }
+  }
+
+  /**
+   * Debug: show/hide the entire water layer (all transparent meshes). Use to
+   * isolate whether a patch is the water surface vs the terrain beneath.
+   */
+  setWaterEnabled(on: boolean): void {
+    this.waterEnabled = on;
+    for (const entry of this.meshes.values()) {
+      const m = entry.transparent;
+      if (m) m.setEnabled(on);
+    }
+  }
+
+  /**
+   * Debug: dump every chunk mesh's name, material name, and triangle count to
+   * the console — for correlating a visible patch with the mesh/material that
+   * produces it.
+   */
+  dumpChunkMaterials(): void {
+    for (const [k, entry] of this.meshes) {
+      for (const slot of ["opaque", "cutout", "transparent"] as const) {
+        const m = entry[slot];
+        if (!m) continue;
+        const vd = m.getVerticesData?.("position");
+        dbg(slot, k, "mat=" + (m.material?.name ?? "null"), "verts=" + (vd ? vd.length / 3 : 0));
+      }
+    }
+  }
+
   private disposeMeshes(k: string): void {
     const entry = this.meshes.get(k);
     if (!entry) return;
@@ -415,13 +644,40 @@ export class World {
     return this.chunks.size;
   }
 
+  /** Number of chunk entries with a transparent (water) mesh — cheap diagnostic. */
+  get waterMeshCount(): number {
+    let n = 0;
+    for (const entry of this.meshes.values()) if (entry.transparent) n++;
+    return n;
+  }
+
+  /**
+   * Full water audit (for the console `__voxl.waterStats()` only — iterates
+   * every loaded block, so do not call per-frame). Reports how many loaded
+   * chunks contain water and the total water block count, to confirm the world
+   * actually generated oceans/lakes near the player.
+   */
+  waterStats(): { chunksWithWater: number; waterBlocks: number; loaded: number } {
+    let chunksWithWater = 0;
+    let waterBlocks = 0;
+    const WATER = 7;
+    for (const chunk of this.chunks.values()) {
+      let local = 0;
+      const b = chunk.blocks;
+      for (let i = 0; i < b.length; i++) if (b[i] === WATER) local++;
+      if (local > 0) { chunksWithWater++; waterBlocks += local; }
+    }
+    return { chunksWithWater, waterBlocks, loaded: this.chunks.size };
+  }
+
   dispose(): void {
     for (const k of [...this.meshes.keys()]) this.disposeMeshes(k);
     this.chunks.clear();
     this.lightDirty.clear();
     this.lighting.dispose();
-    this.terrainMaterial.dispose();
-    this.waterMaterial.dispose();
+    this.terrainOpaque.dispose();
+    this.terrainCutout.dispose();
+    this.waterShader.dispose();
     this.root.dispose();
   }
 }
