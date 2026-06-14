@@ -82,10 +82,10 @@ export function isFood(id: ItemId): boolean {
 
 /** Order of items shown in the creative palette. */
 export const CREATIVE_PALETTE: readonly ItemId[] = [
-  "b1", "b2", "b3", "b4", "b5", "b6", "b9", "b19",
+  "b1", "b2", "b3", "b4", "b5", "b34", "b6", "b35", "b36", "b37", "b9", "b19",
   "b10", "b11", "b12", "b13", "b14", "b15", "b27",
   "b16", "b17", "b18",
-  "b20", "b21", "b22", "b23",
+  "b20", "b21", "b22", "b23", "b30", "b31", "b32", "b33",
   "b24", "b25", "b26",
   "b7",
   "apple", "bread", "cooked_beef", "cookie", "golden_apple",
@@ -117,6 +117,9 @@ const DROP_TABLE: Record<number, ItemId | null> = {
   10: "b2", // snowy grass -> dirt
   11: null, // ice -> melts to nothing
   26: null, // jungle leaves -> nothing
+  35: null, // birch leaves -> nothing
+  36: null, // spruce leaves -> nothing
+  37: null, // snowy leaves -> nothing
 };
 
 export function dropForBlock(blockId: BlockId): ItemId | null {
@@ -131,6 +134,7 @@ const HARDNESS: Record<number, Hardness> = {
   [WATER_BLOCK]: "unbreakable", // fluids can't be punched away
   [WATER_FLOWING_BLOCK]: "unbreakable", // flowing water likewise
   20: "instant", 21: "instant", 22: "instant", [MUSHROOM_BLOCK]: "instant", // plantlike
+  30: "instant", 31: "instant", 32: "instant", 33: "instant", // dead bush, fern, papyrus, cornflower
 };
 
 function hardnessOf(blockId: BlockId): Hardness {

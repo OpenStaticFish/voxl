@@ -140,10 +140,4 @@ export class TreeGenerator {
     }
     for (let y = baseY; y < topY; y++) set(lx, y, lz, B.WOOD);
   }
-
-  /** Cactus column (desert). */
-  placeCactus(set: SetBlock, lx: number, baseY: number, lz: number, wx: number, wz: number): void {
-    const h = 2 + Math.floor(this.r(wx, wz, 32) * 3);
-    for (let i = 0; i < h; i++) set(lx, baseY + i, lz, B.CACTUS);
-  }
 }

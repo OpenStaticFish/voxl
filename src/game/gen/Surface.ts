@@ -43,7 +43,6 @@ export interface SurfaceCtx {
   slope: number;
   biome: BiomeDef;
   effHeat: number;
-  height: number;
   /** A water column exists within the shore radius (bank/shore awareness). */
   nearWater: boolean;
   /** 0..1 — how close the column is to a climate-biome boundary. */
@@ -134,12 +133,10 @@ export function decideSurface(
   topY: number,
   slope: number,
   biome: BiomeDef,
-  height: number,
   nearWater: boolean,
   hasBeach: boolean,
   beachWidth: number,
 ): SurfaceDecision {
-  void height;
   const above = topY - sea;
   const depth = sea - topY;
   const underwater = topY < sea;
@@ -206,7 +203,7 @@ export class SurfacePainter {
   ) {}
 
   paint(ctx: SurfaceCtx): void {
-    const { blocks, size, lx, lz, topY, slope, biome, effHeat, height, nearWater, wx, wz, blendEdge, blendSurface } = ctx;
+    const { blocks, size, lx, lz, topY, slope, biome, effHeat, nearWater, wx, wz, blendEdge, blendSurface } = ctx;
     if (topY < 1) return;
     const idx = (y: number): number => (y * size + lz) * size + lx;
 
@@ -219,7 +216,7 @@ export class SurfacePainter {
     const blendNoise = this.noise.fbm2(wx * 0.07 + 900, wz * 0.07 + 900, 2);
     const beach = shoreBeach(biome, slope, beachStrength);
 
-    const d = decideSurface(this.sea, topY, slope, biome, height, nearWater, beach.hasBeach, beach.width);
+    const d = decideSurface(this.sea, topY, slope, biome, nearWater, beach.hasBeach, beach.width);
     const snow = snowFactor(effHeat, snowNoise);
     const surf = applySnowAndBlend(d, snow, blendEdge, blendSurface, blendNoise);
     blocks[idx(topY)] = surf;

@@ -105,6 +105,13 @@ export class WorldgenOverlay {
   setVisible(v: boolean): void {
     this.visible = v;
     this.root.hidden = !v;
+    if (!v) {
+      // Invalidate the minimap cache so reopening forces a fresh render instead
+      // of showing a stale canvas from the previous session.
+      this.lastRenderX = Number.NaN;
+      this.lastRenderZ = Number.NaN;
+      this.lastRenderMode = null;
+    }
   }
 
   toggle(): boolean {
@@ -189,7 +196,7 @@ export class WorldgenOverlay {
             rgb = heatColor(d.effHeat);
             break;
           case "humidity":
-            // dry(brown) → wet(blue)
+            // dry(red) → wet(blue); heatColor is inverted so 0=red, 1=blue-ish
             rgb = heatColor(1 - d.humidity);
             break;
           case "height": {

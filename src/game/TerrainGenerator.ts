@@ -133,7 +133,7 @@ export class TerrainGenerator {
     const snowNoise = this.noise.fbm2(wx * 0.045 + 1200, wz * 0.045 + 1200, 2);
     const blendNoise = this.noise.fbm2(wx * 0.07 + 900, wz * 0.07 + 900, 2);
     const beach = shoreBeach(biome, slope, beachStrength);
-    const d = decideSurface(SEA, height, slope, biome, height, nearWater, beach.hasBeach, beach.width);
+    const d = decideSurface(SEA, height, slope, biome, nearWater, beach.hasBeach, beach.width);
     const snow = snowFactor(effHeat, snowNoise);
     const blend = landBlend(c.heat, c.humidity);
     const blendSurface = BIOME_DEFS[blend.second].surface;
@@ -276,7 +276,6 @@ export class TerrainGenerator {
         // gets a proper sandy shore instead of the ocean-floor material. For
         // truly underwater columns decideSurface ignores .surface anyway.
         const biome = sel.id === "ocean" ? BIOME_DEFS[sel.landId] : BIOME_DEFS[sel.id];
-        const h2 = heightCol[ci];
         const slope = this.columnSlope(heightCol, lx, lz, wx, wz, size);
         const nearWater = this.nearWaterRadius(surfY, lx, lz, wx, wz, size, 2);
         // Biome-edge blend: near a climate boundary, mottle the surface toward
@@ -294,7 +293,6 @@ export class TerrainGenerator {
           slope,
           biome,
           effHeat: effHeatCol[ci],
-          height: h2,
           nearWater,
           blendEdge: blend.edge,
           blendSurface,
