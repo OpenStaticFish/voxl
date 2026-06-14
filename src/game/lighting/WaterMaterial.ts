@@ -82,8 +82,9 @@ export class WaterMaterial {
     }
   }
 
-  // Day/night + fog + animation are handled by the StandardMaterial (scene
-  // lights + scene fog), so these are kept as no-ops for API compatibility.
+  // Day/night + fog are handled by the StandardMaterial (scene lights + scene
+  // fog), so these are kept as no-ops for API compatibility. (A setTime/animation
+  // hook is intentionally omitted until water animation is actually implemented.)
   setDayNight(_dayFactor: number, _moonFloor: number): void {
     void _dayFactor;
     void _moonFloor;
@@ -93,9 +94,6 @@ export class WaterMaterial {
     void _color;
     void _start;
     void _end;
-  }
-  setTime(_time: number): void {
-    void _time;
   }
 
   dispose(): void {

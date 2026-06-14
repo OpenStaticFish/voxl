@@ -27,6 +27,9 @@ export class ShadowManager {
   private readonly sun: DirectionalLight;
   private readonly world: World;
   private generator: ShadowGenerator | null = null;
+  /** Snapshot of the config the live generator was built with, so configure()
+   *  can skip an expensive teardown/rebuild when nothing actually changed. */
+  private appliedConfig: ShadowConfig | null = null;
   /** Current caster list, rebuilt each frame from nearby chunk meshes. */
   private casters: Mesh[] = [];
   private playerX = 0;
@@ -71,6 +74,7 @@ export class ShadowManager {
       rt.renderParticles = false;
     }
     this.generator = sg;
+    this.appliedConfig = { ...this.config };
   }
 
   /**
@@ -127,8 +131,11 @@ export class ShadowManager {
   /**
    * Reconfigure shadow quality at runtime. Merges a partial config, then either
    * tears down the generator (disabled), builds it (newly enabled), or rebuilds
-   * it (quality params like mapSize/casterRadius/blur changed). Safe to call
-   * repeatedly — no-op when the generator is already gone and disabled.
+   * it (quality params like mapSize/casterRadius/blur changed). Skips the
+   * teardown/rebuild entirely when the resolved config matches the live
+   * generator's config — GraphicsController.applyShadows() runs on every graphics
+   * change (e.g. render scale), so without this guard an unrelated tweak would
+   * needlessly rebuild the shadow generator.
    */
   configure(patch: Partial<ShadowConfig>): void {
     Object.assign(this.config, patch);
@@ -139,6 +146,10 @@ export class ShadowManager {
         this.dispose();
         this.config.enabled = false;
       }
+      return;
+    }
+    // Already enabled with an identical config → nothing to do.
+    if (hasGen && this.appliedConfig && shadowConfigEquals(this.appliedConfig, this.config)) {
       return;
     }
     // wantEnabled === true: ensure a correctly-configured generator exists.
@@ -203,8 +214,28 @@ export class ShadowManager {
   dispose(): void {
     this.generator?.dispose();
     this.generator = null;
+    this.appliedConfig = null;
     this.casters = [];
   }
+}
+
+/**
+ * Structural equality over the shadow-relevant config fields, used by
+ * {@link ShadowManager.configure} to skip a generator rebuild when the resolved
+ * config is unchanged.
+ */
+function shadowConfigEquals(a: ShadowConfig, b: ShadowConfig): boolean {
+  return (
+    a.enabled === b.enabled &&
+    a.mapSize === b.mapSize &&
+    a.frustum === b.frustum &&
+    a.casterRadius === b.casterRadius &&
+    a.blur === b.blur &&
+    a.bias === b.bias &&
+    a.frustumEdgeFalloff === b.frustumEdgeFalloff &&
+    a.shadowMinZ === b.shadowMinZ &&
+    a.shadowMaxZ === b.shadowMaxZ
+  );
 }
 
 /**

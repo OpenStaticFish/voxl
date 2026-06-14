@@ -12,9 +12,11 @@ import { MAX_RENDER_DISTANCE } from "../game/graphics/GraphicsController";
  * active region of the pool and refreshes the SubMesh range — no per-rebuild
  * allocations and no dispose/recreate (which would GC-spike while flying).
  */
-// Worst case: (2*maxViewDistance+1)^2 chunks, each rendered as 4 line segments
-// (8 vertices). Rounded up for a little headroom.
-const MAX_CHUNKS = (2 * MAX_RENDER_DISTANCE + 1) * (2 * MAX_RENDER_DISTANCE + 1) + 32;
+// Worst case loaded-chunk count. World.update() unloads chunks at
+// viewDistance + 2, so the loaded set is the (2*(viewDistance+2)+1)^2 square,
+// not the view-distance square. Size for the unload radius so the overlay can
+// draw borders for every loaded chunk at the max view-distance slider value.
+const MAX_CHUNKS = (2 * (MAX_RENDER_DISTANCE + 2) + 1) * (2 * (MAX_RENDER_DISTANCE + 2) + 1) + 32;
 const SEGMENTS_PER_CHUNK = 4;
 const VERTS_PER_SEGMENT = 2;
 const MAX_VERTS = MAX_CHUNKS * SEGMENTS_PER_CHUNK * VERTS_PER_SEGMENT;

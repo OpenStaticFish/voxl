@@ -31,8 +31,6 @@ export class LightingSystem {
   private readonly world: World;
   private readonly sky: Sky;
   private readonly scene: Scene;
-  /** Accumulated wall-clock seconds, used to drive the water animation. */
-  private elapsed = 0;
 
   constructor(world: World, sky: Sky, scene: Scene) {
     this.world = world;
@@ -74,10 +72,8 @@ export class LightingSystem {
     // Water uses a plain StandardMaterial, so day/night + fog are handled by
     // the scene lights/fog (not custom uniforms). These calls are retained as
     // no-ops for API compatibility (WaterMaterial ignores them).
-    this.elapsed += dt;
     this.world.waterShader.setDayNight(dn.dayFactor, dn.moonFactor);
     this.world.waterShader.setFog(cameraPosition, fogColor, this.scene.fogStart, this.scene.fogEnd);
-    this.world.waterShader.setTime(this.elapsed);
 
     // Shadows are dormant unless explicitly enabled (terrain uses voxel sunlight).
     this.shadows.update(playerX, playerY, playerZ);

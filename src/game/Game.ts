@@ -244,9 +244,13 @@ export class Game {
   // ----------------------------------------------------------- settings ---
 
   private applySettings(patch: Partial<Settings>): void {
-    // Clamp render distance into a browser-safe range before merging.
+    // Clamp render distance into a browser-safe range. Copy the patch first so
+    // we never mutate the caller's object (it may be reused, e.g. by Menus).
     if (patch.viewDistance !== undefined) {
-      patch.viewDistance = Math.max(MIN_RENDER_DISTANCE, Math.min(MAX_RENDER_DISTANCE, Math.round(patch.viewDistance)));
+      patch = {
+        ...patch,
+        viewDistance: Math.max(MIN_RENDER_DISTANCE, Math.min(MAX_RENDER_DISTANCE, Math.round(patch.viewDistance))),
+      };
     }
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
@@ -1126,10 +1130,14 @@ export class Game {
     this.hud.showToast(on ? "Post (FXAA): on" : "Post (FXAA): off");
   }
 
-  /** Debug: toggle real-time shadows (note: terrain can't receive them, so this
-   *  only changes GPU cost, not the look — useful to confirm that). */
+  /** Debug: toggle real-time shadows. Routes through applySettings so the
+   *  shadow tier, the settings UI, and localStorage all stay in sync (terrain
+   *  can't receive shadows yet, so this currently only changes GPU cost, not the
+   *  look — useful to confirm that). */
   _setShadows(on: boolean): void {
-    this.lighting?.shadows.setEnabled(on);
+    const current = this.settings.graphics.shadows;
+    const shadows = on ? (current !== "off" ? current : "medium") : "off";
+    this.applySettings({ graphics: { ...this.settings.graphics, shadows } });
     this.hud.showToast(on ? "Shadows: on" : "Shadows: off");
   }
 
