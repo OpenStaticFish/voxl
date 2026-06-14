@@ -185,11 +185,6 @@ export function presetRenderDistance(preset: GraphicsSettings["preset"]): number
   }
 }
 
-/** Whether the given preset name is one of the built-ins. */
-export function isBuiltinPreset(preset: string): preset is "low" | "medium" | "high" {
-  return preset === "low" || preset === "medium" || preset === "high";
-}
-
 export { GRAPHICS_PRESETS };
 
 function shallowEqual(a: GraphicsSettings, b: GraphicsSettings): boolean {

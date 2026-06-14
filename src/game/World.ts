@@ -128,12 +128,14 @@ export class World {
     this.terrainOpaque = new VoxelTerrainMaterial(scene, { texture: atlas, alphaCutOff: 0.5, doubleSided: true });
     this.terrainCutout = new VoxelTerrainMaterial(scene, { texture: atlas, alphaCutOff: 0.5, doubleSided: true });
 
-    // Transparent pass: animated water shader (alpha-blended, no depth write,
-    // double-sided). Day/night + fog are pushed each frame by LightingSystem.
+    // Transparent pass: a plain StandardMaterial water surface (solid blue tint
+    // + emissive floor + specular, alpha-blended, no depth write, double-sided).
+    // Day/night + fog come from the scene lights/fog; the LightingSystem calls
+    // on waterShader are no-ops retained for API compatibility.
     this.waterShader = new WaterMaterial(scene, { texture: atlas });
   }
 
-  /** The opaque ShaderMaterial (shared, back-face culled). */
+  /** The opaque ShaderMaterial (shared, double-sided until the winding is fixed). */
   get opaqueMaterial(): Material { return this.terrainOpaque.material; }
   /** The cutout ShaderMaterial (shared, double-sided for plant crosses). */
   get cutoutMaterial(): Material { return this.terrainCutout.material; }

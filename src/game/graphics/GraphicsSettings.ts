@@ -112,20 +112,6 @@ export function detectLowEndDevice(): boolean {
   }
 }
 
-/** Whether two graphics configs are equivalent (used to short-circuit reapply). */
-export function graphicsEqual(a: GraphicsSettings, b: GraphicsSettings): boolean {
-  return (
-    a.renderScale === b.renderScale &&
-    a.dprCap === b.dprCap &&
-    a.antiAliasing === b.antiAliasing &&
-    a.shadows === b.shadows &&
-    a.water === b.water &&
-    a.foliage === b.foliage &&
-    a.clouds === b.clouds &&
-    a.fog === b.fog
-  );
-}
-
 /**
  * Recursively fill any missing fields of a (possibly stale, loaded) graphics
  * object against the current defaults, so old saved settings never break on a
@@ -135,9 +121,11 @@ export function migrateGraphics(parsed: Partial<GraphicsSettings> | undefined): 
   const base = defaultGraphicsSettings();
   if (!parsed) return base;
   // Migrate the legacy boolean `clouds` (pre-graphics-settings) into the 3-state
-  // clouds tier if the new field is absent.
+  // clouds tier. Only accept a string for the new field — a stale save could
+  // carry graphics: { clouds: true }, which must not leak through as a boolean.
   const legacy = parsed as Partial<GraphicsSettings> & { clouds?: boolean };
-  let clouds: CloudsQuality | undefined = parsed.clouds;
+  let clouds: CloudsQuality | undefined =
+    typeof parsed.clouds === "string" ? parsed.clouds : undefined;
   if (clouds === undefined && typeof legacy.clouds === "boolean") {
     clouds = legacy.clouds ? "fancy" : "off";
   }
