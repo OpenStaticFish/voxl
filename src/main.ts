@@ -21,6 +21,7 @@ function boot(): void {
     // Debug hooks (not part of the gameplay API).
     debugFlat?: () => void;
     loadedChunks?: () => unknown;
+    debugInfo?: () => Record<string, unknown>;
   }
   (window as unknown as { __voxl?: VoxlAutomation }).__voxl = {
     beginPlay: () => game.beginPlay(),
@@ -30,6 +31,7 @@ function boot(): void {
     takeScreenshot: () => game.takeScreenshot(),
     debugFlat: () => game._enableDebugFlat(),
     loadedChunks: () => game._loadedChunks(),
+    debugInfo: () => game._debugInfo(),
   };
 }
 

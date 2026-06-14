@@ -45,10 +45,12 @@
             <li><kbd>Space</kbd> ×2<span>Toggle flight</span></li>
             <li><kbd>Ctrl</kbd><span>Sprint</span></li>
             <li><kbd>Mouse</kbd><span>Look around</span></li>
-            <li><kbd>L-Click</kbd><span>Break block</span></li>
+            <li><kbd>Hold L-Click</kbd><span>Mine block (progress in survival)</span></li>
             <li><kbd>R-Click</kbd><span>Place block</span></li>
+            <li><kbd>Hold R-Click</kbd><span>Eat selected food</span></li>
             <li><kbd>1</kbd>–<kbd>9</kbd><span>Select hotbar slot</span></li>
             <li><kbd>Scroll</kbd><span>Cycle hotbar</span></li>
+            <li><kbd>E</kbd><span>Open inventory / switch mode</span></li>
             <li><kbd>F</kbd><span>Cycle selected block</span></li>
             <li><kbd>P</kbd><span>Capture screenshot</span></li>
             <li><kbd>Esc</kbd><span>Pause</span></li>
@@ -119,6 +121,9 @@
         </div>
       </section>
 
+      <!-- ===== Inventory screen (built by InventoryUI) ===== -->
+      <section id="inventory-screen" aria-label="Inventory" hidden></section>
+
       <!-- ===== In-game HUD ===== -->
       <div id="hud" hidden>
         <div id="crosshair" aria-hidden="true"></div>
@@ -126,8 +131,16 @@
           <div id="fps" class="badge" hidden>0 fps</div>
           <div id="mode-indicator" class="badge">Walking</div>
           <div id="coords" class="badge">x 0  y 0  z 0</div>
+          <div id="lock-hint" class="badge lock-hint" hidden>Click to capture mouse · or aim with cursor &amp; click to build</div>
         </div>
-        <div id="hotbar" aria-label="Block selection"></div>
+        <div id="hotbar-wrap">
+          <div id="stats">
+            <div id="hearts" class="stat-row stat-left"></div>
+            <div id="air" class="stat-row stat-right" hidden></div>
+            <div id="hunger" class="stat-row stat-right"></div>
+          </div>
+          <div id="hotbar" aria-label="Hotbar"></div>
+        </div>
         <div id="toast" class="toast" hidden></div>
       </div>
 
