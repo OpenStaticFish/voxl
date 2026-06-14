@@ -42,11 +42,11 @@ export class HeightMap {
     const n = this.noise;
     // Continent: broad ocean/landmass. Slight positive bias → more land.
     const continent = n.fbm2(wx * 0.0033, wz * 0.0033, 4);
-    let h = this.sea + 6 + continent * 20;
-
     // Rolling hills.
     const hills = n.fbm2(wx * 0.013 + 200, wz * 0.013 + 200, 3);
-    h += hills * 9;
+    // Continent + hills base (shared with riverOffset to avoid recomputing it).
+    const baseCH = this.sea + 6 + continent * 20 + hills * 9;
+    let h = baseCH;
 
     // Mountains: only where the regional mask allows, then a ridged noise
     // (1 - |n|) raised to a power gives sharp peaks rather than smooth bumps.
@@ -65,7 +65,7 @@ export class HeightMap {
     }
 
     // Rivers: thin ridged bands carved down toward (and slightly below) sea.
-    h += this.riverOffset(wx, wz);
+    h += this.riverOffset(wx, wz, baseCH);
 
     // High-freq detail — damped near sea level so coastlines read as broad,
     // smooth bands instead of noisy 1-block wiggles. The damping uses the
@@ -86,23 +86,21 @@ export class HeightMap {
   }
 
   /**
-   * River carving offset (negative or ~0). A ridged noise produces thin bands
+   * River carving offset (negative or 0). A ridged noise produces thin bands
    * where the value is high; we scoop terrain there toward sea level, leaving
-   * most columns untouched. Returns the delta to add to height.
+   * most columns untouched. `baseCH` is the continent+hills height (passed in
+   * to avoid recomputing the octave noise). The carve is clamped to never RAISE
+   * terrain, so river bands crossing deep ocean leave the seabed alone.
    */
-  private riverOffset(wx: number, wz: number): number {
+  private riverOffset(wx: number, wz: number, baseCH: number): number {
     const n = this.noise;
     const river = 1 - Math.abs(n.noise2(wx * 0.0029 + 800, wz * 0.0029 + 800));
     if (river < 0.82) return 0;
     // Strength of the carve (0..1) inside the band.
     const s = (river - 0.82) / 0.18;
-    // Carve proportionally to how far above sea we are, floor at ~sea-4.
-    // Pre-compute the rough current height by reusing the cheaper terms; the
-    // river contribution is excluded so there's no feedback loop.
-    const approx =
-      this.sea + 6 + n.fbm2(wx * 0.0033, wz * 0.0033, 4) * 20 + n.fbm2(wx * 0.013 + 200, wz * 0.013 + 200, 3) * 9;
     const target = this.sea - 3;
-    const delta = (target - approx) * s * 0.9;
+    // Only carve downward — never raise the floor (would ridge the deep seabed).
+    const delta = Math.min(0, (target - baseCH) * s * 0.9);
     return delta < -52 ? -52 : delta;
   }
 

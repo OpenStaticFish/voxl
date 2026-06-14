@@ -380,12 +380,14 @@ export class Game {
       return h > SEA_LEVEL && gen.biomeAt(x, z, h) !== "ocean";
     };
     if (check(0, 0)) return { x: 0, z: 0 };
-    for (let r = 6; r <= 384; r += 6) {
-      for (let x = -r; x <= r; x += 6) {
+    // Step 8 keeps the worst-case (ocean-start) spiral cheap while still landing
+    // on land within a few blocks of the ideal spot.
+    for (let r = 8; r <= 384; r += 8) {
+      for (let x = -r; x <= r; x += 8) {
         if (check(x, -r)) return { x, z: -r };
         if (check(x, r)) return { x, z: r };
       }
-      for (let z = -r + 6; z <= r - 6; z += 6) {
+      for (let z = -r + 8; z <= r - 8; z += 8) {
         if (check(-r, z)) return { x: -r, z };
         if (check(r, z)) return { x: r, z };
       }

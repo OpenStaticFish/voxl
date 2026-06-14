@@ -81,6 +81,10 @@ const OCEAN: BiomeDef = {
 
 export const BIOME_DEFS: Record<BiomeId, BiomeDef> = {
   ocean: OCEAN,
+  // NOTE: "beach" is a RESERVED palette entry — selectBiome() never returns it
+  // (sand around water is a proximity effect decided by the surface painter, not
+  // an elevation biome). It exists so BiomeId/"beach" stays a valid lookup target
+  // and the minimap can colour-code it if ever selected.
   beach: {
     id: "beach",
     heatPoint: 0.5,

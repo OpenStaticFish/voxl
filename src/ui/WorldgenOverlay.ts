@@ -77,7 +77,7 @@ export class WorldgenOverlay {
     this.modeEl.className = "worldgen-mode";
     this.hintEl = document.createElement("span");
     this.hintEl.className = "perf-hint";
-    this.hintEl.textContent = "G: mode";
+    this.hintEl.textContent = "G toggle · H cycle";
     header.appendChild(title);
     header.appendChild(this.modeEl);
     header.appendChild(this.hintEl);
@@ -179,7 +179,7 @@ export class WorldgenOverlay {
       for (let px = 0; px < MAP_PX; px++) {
         const wx = Math.floor(cx - half + px * STEP);
         const wz = Math.floor(cz - half + py * STEP);
-        const d = gen.debugAt(wx, wz);
+        const d = gen.debugAt(wx, wz, true);
         let rgb: [number, number, number];
         switch (this.mode) {
           case "biome":

@@ -55,7 +55,7 @@ export class TreeGenerator {
     const topY = baseY + trunk;
     for (let y = topY - 3; y <= topY + 1; y++) {
       const t = (y - (topY - 3)) / 4;
-      const layerR = t > 0.75 ? 0 : t > 0.4 ? 2 : 2;
+      const layerR = t > 0.75 ? 0 : 2;
       for (let dz = -layerR; dz <= layerR; dz++) {
         for (let dx = -layerR; dx <= layerR; dx++) {
           if (dx === 0 && dz === 0 && y < topY) continue;

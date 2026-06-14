@@ -1,17 +1,18 @@
 import type { Noise } from "../../engine/Noise";
 
-// Cave generation, modelled on Luanti's mapgen v7 cave system:
+// Cave generation, modelled on Luanti's mapgen v7 worm-tunnel technique:
 //
 //   • Worm tunnels — two 3D noises intersected: a column is air where both lie
-//     within narrow bands, producing winding tubes (the classic "two noises"
-//     technique). A slow noise varies the tube width so tunnels breathe.
-//   • Caverns — a low-frequency 3D fbm above a high threshold, only deep down,
-//     yielding rare large chambers.
+//     within narrow bands, producing winding tubes. A slow noise varies the tube
+//     width so tunnels breathe.
 //
 // Carving respects a surface crust so caves don't gut the dressed terrain, and
-// avoids caves beneath shallow/ocean columns (the liquid sim has no pressure
-// model — see AGENTS.md). Cave *entrances* are allowed on hills via a noise
-// gate so the underground occasionally breaches the surface.
+// never carves below sea level — a carved cell below sea under a land column
+// can't be flooded by fillWater (the column surface is above sea), which would
+// leave dry air pockets under coasts/hills (the liquid sim has no pressure
+// model — see AGENTS.md). Caves therefore exist only above sea, under land.
+// Cave *entrances* are allowed on hills via a noise gate so the underground
+// occasionally breaches the surface.
 
 export class CaveGenerator {
   constructor(private readonly noise: Noise) {}
@@ -24,8 +25,12 @@ export class CaveGenerator {
   isCarved(wx: number, y: number, wz: number, height: number, sea: number): boolean {
     if (y < 2) return false;
     if (y > height + 3) return false;
-    // Keep caves out of shallow / ocean columns (no pressure-based flow sim).
-    if (height <= sea + 1 && y < sea) return false;
+    // Never carve below sea level. A carved cell below sea under a LAND column
+    // can't be flooded — fillWater only runs for columns whose surface is below
+    // sea — so it would leave dry air pockets under coasts/hills, contradicting
+    // the "no sub-sea caves" intent (the liquid sim has no pressure model).
+    // Caves therefore live only above sea (under land).
+    if (y < sea) return false;
 
     const n = this.noise;
 
@@ -33,7 +38,7 @@ export class CaveGenerator {
     const a = n.noise3(wx * 0.04, y * 0.075, wz * 0.04);
     const b = n.noise3(wx * 0.04 + 100, y * 0.05 + 100, wz * 0.04 + 100);
     // Slow width modulation: deeper → slightly wider tunnels.
-    const depthFrac = y < sea ? 1 : Math.max(0, 1 - (height - y) / 40);
+    const depthFrac = Math.max(0, 1 - (height - y) / 40);
     const half = 0.062 + depthFrac * 0.02;
     const tube = 0.3;
     if (Math.abs(a) < half && Math.abs(b) < tube) {
@@ -44,16 +49,6 @@ export class CaveGenerator {
         if (height < sea + 14 || entrance < 0.5) return false;
       }
       return true;
-    }
-
-    // --- Caverns (rare, deep) ---
-    if (y < sea - 14 && y > 2) {
-      const c = n.fbm3(wx * 0.018 + 50, y * 0.025 + 50, wz * 0.018 + 50, 2);
-      if (c > 0.6) {
-        // Preserve the crust even for caverns near the surface.
-        if (y > height - 6) return false;
-        return true;
-      }
     }
     return false;
   }

@@ -4,7 +4,7 @@ import { getBlock } from "./Blocks";
 import type { Chunk } from "./Chunk";
 import * as B from "./gen/BlockIds";
 import { ClimateMaps } from "./gen/Climate";
-import { BIOME_DEFS, landBiome, landBlend, selectBiome, type BiomeId, type BiomeSelection, type TreeType } from "./gen/Biomes";
+import { BIOME_DEFS, landBlend, selectBiome, type BiomeId, type BiomeSelection, type TreeType } from "./gen/Biomes";
 import { HeightMap } from "./gen/TerrainNoise";
 import { CaveGenerator } from "./gen/Caves";
 import { OreGenerator } from "./gen/Ores";
@@ -67,8 +67,14 @@ export class TerrainGenerator {
     return selectBiome(effHeat, c.humidity, height, SEA, ROCK_LINE, SNOW_LINE).id;
   }
 
-  /** Rich climate/debug info at a column (for the world-gen overlay). */
-  debugAt(wx: number, wz: number): {
+  /**
+   * Rich climate/debug info at a column (for the world-gen overlay). Pass
+   * `fast=true` for the per-pixel minimap render: it skips the expensive
+   * radius-8 water-extent scan and the radius-6 shore distance (using a cheap
+   * height-based near-water approximation instead), cutting ~600 noise evals
+   * per call. The single target-column readout uses the full (slow) path.
+   */
+  debugAt(wx: number, wz: number, fast = false): {
     biome: BiomeId;
     landBiome: BiomeId;
     heat: number;
@@ -98,8 +104,29 @@ export class TerrainGenerator {
     // Waterline cells use the adjacent land biome (matches the surface painter).
     const biome = sel.id === "ocean" ? BIOME_DEFS[sel.landId] : BIOME_DEFS[sel.id];
     const slope = this.heightMap.slope(wx, wz);
-    const shoreDist = this.shoreDistance(wx, wz, 6);
-    const nearWater = shoreDist <= 2;
+    let shoreDist: number;
+    let nearWater: boolean;
+    let waterExtent: number;
+    if (fast) {
+      // Cheap approximation for the minimap: treat low columns as "near water".
+      nearWater = height <= SEA + 1;
+      shoreDist = nearWater ? 1 : 7;
+      waterExtent = -1;
+    } else {
+      shoreDist = this.shoreDistance(wx, wz, 6);
+      nearWater = shoreDist <= 2;
+      // Local water-extent estimate (fraction of radius-8 neighbourhood below
+      // sea) — distinguishes open ocean (~1) from small ponds/rivers (~0).
+      let waterCells = 0;
+      let totalCells = 0;
+      for (let dz = -8; dz <= 8; dz += 2) {
+        for (let dx = -8; dx <= 8; dx += 2) {
+          totalCells++;
+          if (Math.floor(this.heightMap.height(wx + dx, wz + dz)) < SEA) waterCells++;
+        }
+      }
+      waterExtent = waterCells / totalCells;
+    }
     // Match the painter's noises + overlays so the overlay explains the block.
     const bs = 0.5 + 0.5 * this.noise.fbm2(wx * 0.03, wz * 0.03, 2);
     const beachStrength = bs < 0 ? 0 : bs > 1 ? 1 : bs;
@@ -111,17 +138,6 @@ export class TerrainGenerator {
     const blend = landBlend(c.heat, c.humidity);
     const blendSurface = BIOME_DEFS[blend.second].surface;
     const final = applySnowAndBlend(d, snow, blend.edge, blendSurface, blendNoise);
-    // Cheap local water-extent estimate (fraction of radius-8 neighbourhood
-    // below sea) — distinguishes open ocean (~1) from small ponds/rivers (~0).
-    let waterCells = 0;
-    let totalCells = 0;
-    for (let dz = -8; dz <= 8; dz += 2) {
-      for (let dx = -8; dx <= 8; dx += 2) {
-        totalCells++;
-        if (Math.floor(this.heightMap.height(wx + dx, wz + dz)) < SEA) waterCells++;
-      }
-    }
-    const waterExtent = waterCells / totalCells;
     return {
       biome: sel.id,
       landBiome: sel.landId,
@@ -505,6 +521,3 @@ export function findGroundY(chunk: Chunk, lx: number, lz: number): number {
   }
   return 0;
 }
-
-// Re-exports for the debug overlay / console API.
-export { landBiome, landBlend, type BiomeId };
