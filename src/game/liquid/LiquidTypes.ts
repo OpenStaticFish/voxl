@@ -45,6 +45,3 @@ export interface LiquidDebugSnapshot {
   /** Number of chunks marked dirty for a remesh (live). */
   dirtyChunks: number;
 }
-
-/** Debug visualisation mode for the liquid overlay. */
-export type LiquidDebugMode = "off" | "levels" | "queue" | "sources";

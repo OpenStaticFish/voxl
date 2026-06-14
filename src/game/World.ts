@@ -257,11 +257,14 @@ export class World {
     // Liquids affect light (flowing water is transparent + light-conducting),
     // so recompute lighting exactly like a terrain edit.
     this.relightChunkNow(chunk, false);
-    // A border edit may change a neighbour's border faces/light too.
-    if (lx === 0) this.queueNeighbourLight(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) this.queueNeighbourLight(cx + 1, cz);
-    if (lz === 0) this.queueNeighbourLight(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) this.queueNeighbourLight(cx, cz + 1);
+    // A border edit may change a neighbour's border faces/light too. Liquids are
+    // transparent + light-conducting, so a lighting change is NOT guaranteed
+    // (unlike opaque edits); mark the neighbour dirty explicitly so its border
+    // water side/step faces remesh even when light is unchanged.
+    if (lx === 0) { this.queueNeighbourLight(cx - 1, cz); this.markDirty(cx - 1, cz); }
+    if (lx === CHUNK_SIZE - 1) { this.queueNeighbourLight(cx + 1, cz); this.markDirty(cx + 1, cz); }
+    if (lz === 0) { this.queueNeighbourLight(cx, cz - 1); this.markDirty(cx, cz - 1); }
+    if (lz === CHUNK_SIZE - 1) { this.queueNeighbourLight(cx, cz + 1); this.markDirty(cx, cz + 1); }
     return true;
   }
 
@@ -312,6 +315,39 @@ export class World {
   private markDirty(cx: number, cz: number): void {
     const chunk = this.chunks.get(key(cx, cz));
     if (chunk && chunk.generated) chunk.dirty = true;
+  }
+
+  /**
+   * Wake the liquid simulator for every LIQUID cell along one edge of chunk
+   * (cx,cz). Used when a neighbouring chunk unloads: the liquid that was fed
+   * across that border must recompute (it may now dry up). `edge` selects the
+   * shared border — "xHigh"/"xLow" scan a constant local X column, "zHigh"/
+   * "zLow" a constant local Z row. Only liquid cells are enqueued, so the cost
+   * is bounded by how much water actually sits on the border (usually little).
+   */
+  private wakeBorderLiquid(cx: number, cz: number, edge: "xHigh" | "xLow" | "zHigh" | "zLow"): void {
+    const chunk = this.chunks.get(key(cx, cz));
+    if (!chunk || !chunk.generated) return;
+    const ox = chunk.originX;
+    const oz = chunk.originZ;
+    const b = chunk.blocks;
+    if (edge === "xHigh" || edge === "xLow") {
+      const lx = edge === "xHigh" ? CHUNK_SIZE - 1 : 0;
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+          const id = b[(y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx];
+          if (getBlock(id).liquid) this.liquid.enqueue(ox + lx, y, oz + lz);
+        }
+      }
+    } else {
+      const lz = edge === "zHigh" ? CHUNK_SIZE - 1 : 0;
+      for (let y = 0; y < CHUNK_HEIGHT; y++) {
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          const id = b[(y * CHUNK_SIZE + lz) * CHUNK_SIZE + lx];
+          if (getBlock(id).liquid) this.liquid.enqueue(ox + lx, y, oz + lz);
+        }
+      }
+    }
   }
 
   /**
@@ -626,13 +662,21 @@ export class World {
         this.chunks.delete(k);
         this.lighting.removeLight(chunk.cx, chunk.cz);
         this.lightDirty.delete(k);
-        // Re-seed liquid along the new world edge so neighbours of the unloaded
-        // chunk recompute their border flow (a chunk vanishing changes boundary
-        // cells from "loaded" to "void", which stops flow into that direction).
+        // When a chunk vanishes, its border cells change from "loaded" to
+        // "void", which affects the liquid simulator: water that was flowing
+        // FROM the unloaded chunk into a neighbour loses its feeder and must
+        // dry up. markDirty only flags a remesh — it does NOT recompute liquid
+        // state — so also wake the simulator for the liquid cells along each
+        // neighbour's shared border. Otherwise stale flowing water hangs in the
+        // air at the new world edge.
         this.markDirty(chunk.cx - 1, chunk.cz);
         this.markDirty(chunk.cx + 1, chunk.cz);
         this.markDirty(chunk.cx, chunk.cz - 1);
         this.markDirty(chunk.cx, chunk.cz + 1);
+        this.wakeBorderLiquid(chunk.cx - 1, chunk.cz, "xHigh");
+        this.wakeBorderLiquid(chunk.cx + 1, chunk.cz, "xLow");
+        this.wakeBorderLiquid(chunk.cx, chunk.cz - 1, "zHigh");
+        this.wakeBorderLiquid(chunk.cx, chunk.cz + 1, "zLow");
       }
     }
 

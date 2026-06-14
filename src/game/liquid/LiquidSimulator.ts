@@ -287,7 +287,7 @@ export class LiquidSimulator {
     // Renewable source creation: ≥2 source neighbours + solid/source support.
     if (ldef?.renewable) {
       const sources = this.countSourceNeighbours(access, x, y, z);
-      const supported = !belowFloodable || below === WATER_BLOCK;
+      const supported = getBlock(below).solid || below === WATER_BLOCK;
       if (sources >= 2 && supported) {
         if (this.write(access, x, y, z, WATER_BLOCK, 0)) this.wakeAround(x, y, z);
         return;
@@ -345,7 +345,7 @@ export class LiquidSimulator {
     // Renewable into air (classic 2-source pool fill).
     if (ldef.renewable) {
       const sources = this.countSourceNeighbours(access, x, y, z);
-      const supported = !belowFloodable || below === WATER_BLOCK;
+      const supported = getBlock(below).solid || below === WATER_BLOCK;
       if (sources >= 2 && supported) {
         if (this.write(access, x, y, z, WATER_BLOCK, 0)) this.wakeAround(x, y, z);
         return;
@@ -392,23 +392,6 @@ export class LiquidSimulator {
 
   // ----------------------------------------------------------- helpers ---
 
-  /**
-   * Best (highest) feeder for cell (x,y,z) under the ACYCLIC feeding rule that
-   * guarantees convergence:
-   *
-   *   • The cell directly ABOVE counts as a feeder when its head is ≥ `ownHead`
-   *     — this sustains a waterfall column (a stack of equal-level flowing cells
-   *     falling through air) without letting water flow UP into air.
-   *   • HORIZONTAL neighbours count only when their head is STRICTLY GREATER
-   *     than `ownHead`, so two equal-level cells on a broad front can never feed
-   *     each other (the oscillation trap). Flow therefore always moves from
-   *     higher head → lower head, which is acyclic.
-   *
-   * Downward neighbours are never feeders (downward is a drain, not a source).
-   *
-   * `allowAboveColumn` is false for air cells so water never spawns above an
-   * existing surface.
-   */
   /**
    * Feeder analysis for cell (x,y,z), split into the cell directly ABOVE and
    * the four HORIZONTAL neighbours. They feed under different rules:

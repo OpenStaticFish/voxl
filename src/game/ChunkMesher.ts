@@ -331,7 +331,6 @@ function pushLiquidCell(
   // Horizontal faces: step against lower-level water, full against non-water.
   // Between equal-level same-liquid neighbours NOTHING is drawn (culled), which
   // is what removes the internal grid. Only shore/exposed/step faces render.
-  const below = getBlockWorld(x, y - 1, z);
   const horiz: Array<[number, number, number, number]> = [
     [FACE.PX, x + 1, y, z],
     [FACE.NX, x - 1, y, z],
@@ -351,7 +350,6 @@ function pushLiquidCell(
       // Hidden by opaque terrain — cull.
     } else {
       // Air / plant / different transparent — full side.
-      void below;
       pushScaledFace(b, fi, x, y, z, sampleBrightness(nx, ny, nz, FACE_BRIGHTNESS[fi]), 0, top);
     }
   }

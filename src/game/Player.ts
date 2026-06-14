@@ -183,8 +183,12 @@ export class Player {
         this.velocity.y = Math.max(this.velocity.y, -2.6);
         if (input.isDown("Space")) this.velocity.y = 5.2;
         // Gentle horizontal drag so the player coasts to a stop in water.
-        this.velocity.x *= 0.86;
-        this.velocity.z *= 0.86;
+        // dt-aware exponential decay so the feel is identical at 30 / 60 / 144
+        // FPS (0.86 is the per-60Hz-frame factor; pow scales it to the actual
+        // frame delta).
+        const drag = Math.pow(0.86, dt * 60);
+        this.velocity.x *= drag;
+        this.velocity.z *= drag;
       } else if (input.isDown("Space") && this.onGround) {
         this.velocity.y = JUMP_SPEED;
         this.onGround = false;
