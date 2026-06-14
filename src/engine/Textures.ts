@@ -409,6 +409,119 @@ export function createTextureAtlas(scene: Scene): AtlasResult {
     }
   }
 
+  // --- Richer-world tiles (world-gen upgrade): 34..42 ---
+
+  // 34: dead bush (desert — dry brown twigs, plantlike transparent bg)
+  {
+    const [ox, oy] = off(34);
+    ctx.clearRect(ox, oy, TILE_PX, TILE_PX);
+    ctx.fillStyle = "rgb(120,92,52)";
+    // central stalk
+    ctx.fillRect(ox + 8, oy + 4, 1, 10);
+    // branching twigs
+    ctx.fillRect(ox + 8, oy + 6, 3, 1);
+    ctx.fillRect(ox + 11, oy + 6, 1, 3);
+    ctx.fillRect(ox + 5, oy + 8, 3, 1);
+    ctx.fillRect(ox + 4, oy + 6, 1, 3);
+    ctx.fillStyle = "rgb(150,116,70)";
+    ctx.fillRect(ox + 8, oy + 11, 4, 1);
+    ctx.fillRect(ox + 12, oy + 11, 1, 3);
+    ctx.fillRect(ox + 6, oy + 12, 2, 1);
+  }
+  // 35: fern (forest ground cover, plantlike)
+  {
+    const [ox, oy] = off(35);
+    ctx.clearRect(ox, oy, TILE_PX, TILE_PX);
+    const shades = ["#3e7e36", "#4e8e40", "#5ea048"];
+    for (let i = 0; i < 5; i++) {
+      const bx = ox + 3 + i * 2;
+      const h = 6 + (i % 3) * 2;
+      ctx.fillStyle = shades[i % shades.length];
+      for (let y = 0; y < h; y++) {
+        const w = y < h - 2 ? 1 : 2;
+        ctx.fillRect(bx - (y > h - 3 ? 1 : 0), oy + (TILE_PX - h) + y, w, 1);
+        ctx.fillRect(bx + (y > h - 3 ? 0 : 0), oy + (TILE_PX - h) + y, 1, 1);
+      }
+    }
+  }
+  // 36: papyrus (tall reed near water, plantlike)
+  {
+    const [ox, oy] = off(36);
+    ctx.clearRect(ox, oy, TILE_PX, TILE_PX);
+    for (const cx of [6, 8, 10]) {
+      const h = 12 + (cx % 3);
+      for (let y = 0; y < h; y++) {
+        const d = (rand() - 0.5) * 16;
+        const g = clamp255(150 + d) | 0;
+        ctx.fillStyle = `rgb(${clamp255(130 + d) | 0},${g},${clamp255(80 + d) | 0})`;
+        ctx.fillRect(ox + cx, oy + (TILE_PX - h) + y, 1, 1);
+      }
+      // leafy top
+      ctx.fillStyle = "rgb(110,150,64)";
+      ctx.fillRect(ox + cx - 1, oy + (TILE_PX - h), 1, 1);
+      ctx.fillRect(ox + cx + 1, oy + (TILE_PX - h) + 1, 1, 1);
+    }
+  }
+  // 37: cornflower (blue flower, plantlike)
+  {
+    const [ox, oy] = off(37);
+    drawFlower(ctx, ox, oy, rand, [74, 108, 214]);
+  }
+  // 38: birch wood top (pale with faint rings)
+  {
+    const [ox, oy] = off(38);
+    paintSpeckled(ctx, ox, oy, [216, 208, 188], 8, 50, rand);
+    ctx.strokeStyle = "rgba(150,140,120,0.6)";
+    ctx.beginPath();
+    ctx.arc(ox + 8, oy + 8, 4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // 39: birch wood side (white bark with black dashes)
+  {
+    const [ox, oy] = off(39);
+    paintSpeckled(ctx, ox, oy, [222, 214, 196], 8, 70, rand);
+    ctx.fillStyle = "rgb(54,50,46)";
+    for (let i = 0; i < 7; i++) {
+      const x = ox + Math.floor(rand() * (TILE_PX - 3));
+      const y = oy + 1 + Math.floor(rand() * (TILE_PX - 2));
+      const w = 2 + Math.floor(rand() * 2);
+      ctx.fillRect(x, y, w, 1);
+    }
+  }
+  // 40: birch leaves (bright yellow-green, lighter than oak)
+  {
+    const [ox, oy] = off(40);
+    paintSpeckled(ctx, ox, oy, [120, 170, 70], 36, 150, rand);
+    for (let i = 0; i < 8; i++) {
+      ctx.fillStyle = "rgb(90,140,46)";
+      ctx.fillRect(ox + Math.floor(rand() * TILE_PX), oy + Math.floor(rand() * TILE_PX), 1, 1);
+    }
+  }
+  // 41: spruce leaves (dark, cold green for taiga/snowy pines)
+  {
+    const [ox, oy] = off(41);
+    paintSpeckled(ctx, ox, oy, [38, 74, 42], 28, 150, rand);
+    for (let i = 0; i < 14; i++) {
+      ctx.fillStyle = "rgb(22,48,26)";
+      ctx.fillRect(ox + Math.floor(rand() * TILE_PX), oy + Math.floor(rand() * TILE_PX), 1, 1);
+    }
+  }
+  // 42: snowy leaves (spruce green dusted with white snow)
+  {
+    const [ox, oy] = off(42);
+    paintSpeckled(ctx, ox, oy, [40, 78, 46], 26, 120, rand);
+    // snow caps along the top third
+    ctx.fillStyle = "rgb(238,242,250)";
+    for (let x = 0; x < TILE_PX; x++) {
+      const h = 3 + Math.floor(rand() * 4);
+      for (let y = 0; y < h; y++) {
+        const d = (rand() - 0.5) * 12;
+        ctx.fillStyle = `rgb(${clamp255(238 + d) | 0},${clamp255(242 + d) | 0},${clamp255(250 + d) | 0})`;
+        ctx.fillRect(ox + x, oy + y, 1, 1);
+      }
+    }
+  }
+
   // Upload the painted canvas to the GPU.
   texture.update(false);
 

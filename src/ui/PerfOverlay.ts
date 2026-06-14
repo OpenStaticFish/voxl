@@ -55,6 +55,11 @@ export interface PerfSnapshot {
   firstLiquid: { x: number; y: number; z: number } | null;
   waterSidesOn: boolean;
   waterAnimOn: boolean;
+  // World-generation diagnostics (TerrainGenerator stats + player biome).
+  genAvgMs: number;
+  genLastMs: number;
+  genChunks: number;
+  biome: string;
 }
 
 function $(id: string): HTMLElement {
@@ -83,6 +88,7 @@ export class PerfOverlay {
   private readonly liquidEl: HTMLElement;
   private readonly targetEl: HTMLElement;
   private readonly memEl: HTMLElement;
+  private readonly genEl: HTMLElement;
   private visible = false;
 
   constructor() {
@@ -119,6 +125,7 @@ export class PerfOverlay {
     this.liquidEl = mkline(grid, "liquid");
     this.targetEl = mkline(grid, "target");
     this.memEl = mkline(grid, "mem");
+    this.genEl = mkline(grid, "worldgen");
     root.appendChild(grid);
 
     this.root = root;
@@ -181,6 +188,11 @@ export class PerfOverlay {
     } else {
       setLine(this.memEl, `${tod}${s.gpuRenderer ? " · " + s.gpuRenderer : ""}`);
     }
+    setLine(
+      this.genEl,
+      `${s.genAvgMs.toFixed(1)}ms avg · ${s.genLastMs.toFixed(1)} last · ${s.genChunks} chunks · ${s.biome}`,
+      s.genAvgMs > 8 ? "var(--danger)" : s.genAvgMs > 5 ? "var(--warm)" : "",
+    );
   }
 }
 

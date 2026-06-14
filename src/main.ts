@@ -49,6 +49,10 @@ function boot(): void {
     waterDepth?: (on?: boolean) => void;
     waterSimple?: (on?: boolean) => void;
     targetLiquids?: (on?: boolean) => boolean;
+    // World-gen debug surface (see WorldgenOverlay / TerrainGenerator).
+    worldgen?: (on?: boolean) => void;
+    worldgenMode?: (mode: "biome" | "heat" | "humidity" | "height" | "slope" | "shore" | "snow") => void;
+    worldgenInfo?: () => void;
   }
   (window as unknown as { __voxl?: VoxlAutomation }).__voxl = {
     beginPlay: () => game.beginPlay(),
@@ -82,6 +86,9 @@ function boot(): void {
     waterDepth: (on) => game._setWaterDepth(on ?? true),
     waterSimple: (on) => game._setWaterSimple(on ?? true),
     targetLiquids: (on) => game._setTargetLiquids(on),
+    worldgen: (on) => game._toggleWorldgen(on),
+    worldgenMode: (mode) => game._worldgenMode(mode),
+    worldgenInfo: () => game._worldgenInfo(),
   };
 }
 
