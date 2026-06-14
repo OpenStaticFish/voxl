@@ -53,6 +53,7 @@
             <li><kbd>E</kbd><span>Open inventory / switch mode</span></li>
             <li><kbd>F</kbd><span>Cycle selected block</span></li>
             <li><kbd>P</kbd><span>Capture screenshot</span></li>
+            <li><kbd>F3</kbd><span>Toggle perf overlay (FPS / draw / chunks)</span></li>
             <li><kbd>Esc</kbd><span>Pause</span></li>
           </ul>
           <button class="btn btn-primary" data-back>Back</button>
@@ -66,7 +67,7 @@
           <div class="setting">
             <label for="set-viewdistance">View distance</label>
             <div class="setting-row">
-              <input type="range" id="set-viewdistance" min="2" max="10" step="1" />
+              <input type="range" id="set-viewdistance" min="2" max="12" step="1" />
               <output id="out-viewdistance">—</output>
             </div>
           </div>
@@ -90,12 +91,74 @@
               <input type="checkbox" id="set-fps" />
             </div>
           </div>
+
+          <div class="setting-divider"><span>Graphics</span></div>
+
           <div class="setting">
-            <label for="set-clouds">Clouds</label>
-            <div class="setting-row">
-              <input type="checkbox" id="set-clouds" checked />
+            <label>Graphics preset</label>
+            <div class="preset-row" role="group" aria-label="Graphics preset">
+              <button type="button" class="btn btn-small" data-preset="low">Low</button>
+              <button type="button" class="btn btn-small" data-preset="medium">Medium</button>
+              <button type="button" class="btn btn-small" data-preset="high">High</button>
             </div>
           </div>
+          <div class="setting">
+            <label for="set-renderscale">Render scale</label>
+            <div class="setting-row">
+              <select id="set-renderscale" class="select-input">
+                <option value="0.75">0.75 (faster)</option>
+                <option value="1">1.0 (native)</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-shadows">Shadows</label>
+            <div class="setting-row">
+              <select id="set-shadows" class="select-input">
+                <option value="off">Off</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-water">Water</label>
+            <div class="setting-row">
+              <select id="set-water" class="select-input">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-foliage">Foliage</label>
+            <div class="setting-row">
+              <select id="set-foliage" class="select-input">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-clouds2">Clouds</label>
+            <div class="setting-row">
+              <select id="set-clouds2" class="select-input">
+                <option value="off">Off</option>
+                <option value="simple">Simple</option>
+                <option value="fancy">Fancy</option>
+              </select>
+            </div>
+          </div>
+          <div class="setting">
+            <label for="set-aa">Anti-aliasing (FXAA)</label>
+            <div class="setting-row">
+              <input type="checkbox" id="set-aa" />
+            </div>
+          </div>
+
           <div class="setting">
             <label for="set-seed">World seed</label>
             <div class="setting-row">
@@ -126,6 +189,7 @@
 
       <!-- ===== In-game HUD ===== -->
       <div id="hud" hidden>
+        <div id="perf" hidden></div>
         <div id="crosshair" aria-hidden="true"></div>
         <div id="status">
           <div id="fps" class="badge" hidden>0 fps</div>

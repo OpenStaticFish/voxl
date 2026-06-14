@@ -3,6 +3,7 @@ import {
   Color4,
   DynamicTexture,
   LinesMesh,
+  AbstractMesh,
   Mesh,
   MeshBuilder,
   Scene,
@@ -41,6 +42,10 @@ import { Menus } from "../ui/Menus";
 import { InventoryUI } from "../ui/InventoryUI";
 import { loadSettings, saveSettings } from "../state/Settings";
 import { LightingSystem } from "./lighting/LightingSystem";
+import { GraphicsController, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, presetRenderDistance } from "./graphics/GraphicsController";
+import { graphicsFromPreset, type GraphicsPreset, type GraphicsSettings } from "./graphics/GraphicsSettings";
+import { PerfOverlay, type PerfSnapshot } from "../ui/PerfOverlay";
+import { ChunkBorderOverlay } from "../ui/ChunkBorderOverlay";
 import { dbg, dbgWarn } from "../state/Debug";
 
 const SPAWN_PREGEN_RADIUS = 2;
@@ -77,11 +82,16 @@ export class Game {
   private readonly inventory = new Inventory(INVENTORY_SIZE, HOTBAR_SIZE);
   private readonly stats = new PlayerState();
   private readonly invUI: InventoryUI;
+  private readonly graphics: GraphicsController;
+  private readonly perf: PerfOverlay;
+  private readonly chunkBorders: ChunkBorderOverlay;
 
   private selectedIndex = 0;
   private last = performance.now();
   private fpsEma = 60;
+  private frameMsEma = 16.7;
   private hudTimer = 0;
+  private perfTimer = 0;
   private running = false;
 
   private inventoryOpen = false;
@@ -95,6 +105,8 @@ export class Game {
   private cactusT = 0;
   private saveTimer = 0;
   private lastTargetKey = "";
+  /** Render-debug wireframe overlay (terrain + water). Dev only. */
+  private wireframe = false;
 
   constructor(host: HTMLElement) {
     this.settings = loadSettings();
@@ -131,12 +143,19 @@ export class Game {
       () => this.settings.mode,
     );
 
+    // Graphics pipeline: owns render scale + post-processing, and binds per-world
+    // material/shadow/cloud settings when a world is created. Apply once now so
+    // render scale / AA / clouds are correct on the main menu too.
+    this.graphics = new GraphicsController(this.renderer.engine, scene, this.sky, this.player.camera);
+    this.perf = new PerfOverlay();
+    this.chunkBorders = new ChunkBorderOverlay(scene);
+    this.graphics.apply(this.settings.graphics);
+
     this.highlight = makeHighlight(scene);
     const { mesh, material } = makeBreakOverlay(scene);
     this.breakOverlay = mesh;
     this.breakMaterial = material;
 
-    this.sky.setCloudsEnabled(this.settings.clouds);
     this.hud.setFpsVisible(this.settings.showFps);
     this.screens.setMenuSeed(this.settings.seed);
 
@@ -158,6 +177,7 @@ export class Game {
     this.menus.onResume = () => this.resume();
     this.menus.onQuit = () => this.quitToMenu();
     this.menus.onSettingsChange = (patch) => this.applySettings(patch);
+    this.menus.onGraphicsPreset = (preset) => this.applyGraphicsPreset(preset);
     this.menus.onRegenerate = (seed) => this.regenerate(seed);
 
     this.invUI.onModeChange = (mode) => this.setMode(mode);
@@ -176,6 +196,15 @@ export class Game {
       if (!down) return;
       if (code === "KeyP") void this.takeScreenshot();
       if (code === "KeyF") this.selectSlot(this.selectedIndex + 1);
+      if (code === "F3") {
+        const on = this.perf.toggle();
+        this.hud.showToast(on ? "Perf overlay: on" : "Perf overlay: off");
+      }
+      if (code === "KeyN") this.toggleWireframe();
+      if (code === "KeyB") {
+        const on = this.chunkBorders.toggle();
+        this.hud.showToast(on ? "Chunk borders: on" : "Chunk borders: off");
+      }
       if (code === "KeyE" && (this.state === "playing" || this.inventoryOpen)) this.toggleInventory();
       if (code === "Escape") {
         if (this.inventoryOpen) this.closeInventory();
@@ -190,6 +219,17 @@ export class Game {
     this.renderer.canvas.addEventListener("click", () => {
       if (this.state === "playing" && !this.input.locked && !this.inventoryOpen) this.input.requestLock();
     });
+    // WebGL context loss/recovery: Babylon auto-restores GL state, but surface a
+    // toast so the player knows a hiccup happened (common when switching tabs on
+    // integrated GPUs). No data is lost — chunk meshes are re-uploaded by Babylon.
+    this.renderer.engine.onContextLostObservable.add(() => {
+      dbgWarn("WebGL context lost — Babylon will attempt to restore");
+      this.hud.showToast("WebGL context lost — restoring…");
+    });
+    this.renderer.engine.onContextRestoredObservable.add(() => {
+      dbg("WebGL context restored");
+      this.hud.showToast("WebGL context restored");
+    });
   }
 
   private handleResize = (): void => {
@@ -197,18 +237,33 @@ export class Game {
     const h = window.innerHeight;
     this.renderer.setSize(w, h);
     this.player.setAspect(w / h);
+    // DPR can change when the window moves between displays; keep render scale correct.
+    this.graphics.refreshRenderScale();
   };
 
   // ----------------------------------------------------------- settings ---
 
   private applySettings(patch: Partial<Settings>): void {
+    // Clamp render distance into a browser-safe range. Copy the patch first so
+    // we never mutate the caller's object (it may be reused, e.g. by Menus).
+    if (patch.viewDistance !== undefined) {
+      patch = {
+        ...patch,
+        viewDistance: Math.max(MIN_RENDER_DISTANCE, Math.min(MAX_RENDER_DISTANCE, Math.round(patch.viewDistance))),
+      };
+    }
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
     this.screens.setMenuSeed(this.settings.seed);
     if (patch.fov !== undefined) this.player.setFov(patch.fov);
-    if (patch.clouds !== undefined) this.sky.setCloudsEnabled(patch.clouds);
     if (patch.showFps !== undefined) this.hud.setFpsVisible(patch.showFps);
     if (patch.viewDistance !== undefined) this.updateFog();
+    // Graphics settings are applied reactively (render scale, AA, shadows,
+    // clouds, water, foliage) — no page reload needed.
+    if (patch.graphics !== undefined) {
+      this.graphics.apply(this.settings.graphics);
+      this.updateFog(); // fog toggle / view-distance interplay
+    }
     if (patch.mode !== undefined) {
       this.player.canFly = patch.mode === "creative";
       if (patch.mode === "survival") this.player.flying = false;
@@ -216,6 +271,17 @@ export class Game {
       this.refreshHud();
     }
     this.menus.updateCurrent(this.settings);
+  }
+
+  /**
+   * Switch to a built-in preset (low/medium/high): applies the full graphics
+   * config AND nudges the render distance to the preset's recommended value,
+   * so a "Low" preset is actually faster (shorter view) and "High" reaches
+   * further. Used by the settings UI.
+   */
+  applyGraphicsPreset(preset: GraphicsPreset): void {
+    const graphics: GraphicsSettings = graphicsFromPreset(preset);
+    this.applySettings({ graphics, viewDistance: presetRenderDistance(preset) });
   }
 
   // ------------------------------------------------------ game states ---
@@ -273,6 +339,9 @@ export class Game {
     this.sky.setCloudSeed(seed);
     // Wire the lighting system into the new world + the sky's Babylon lights.
     this.lighting = new LightingSystem(this.world, this.sky, this.scene);
+    // Re-bind the graphics controller to the new world so material/shadow/cloud
+    // settings apply to it (the controller re-applies the full config).
+    this.graphics.attachWorld(this.world, this.lighting);
   }
 
   /** Load inventory+vitals for this seed, or seed a fresh starter kit. */
@@ -390,12 +459,12 @@ export class Game {
     if (this.state === "playing") {
       if (this.inventoryOpen) {
         // Freeze the action but keep the world streaming + rendering.
-        this.world?.update(this.player.position.x, this.player.position.z, this.settings.viewDistance);
+        this.world?.update(this.player.position.x, this.player.position.z, this.settings.viewDistance, dt * 1000);
       } else {
         this.update(dt);
       }
     } else if (this.state === "paused") {
-      this.world?.update(this.player.position.x, this.player.position.z, this.settings.viewDistance);
+      this.world?.update(this.player.position.x, this.player.position.z, this.settings.viewDistance, dt * 1000);
     }
 
     // Advance day/night + position sun/moon + push terrain uniforms even while
@@ -413,13 +482,22 @@ export class Game {
     this.sky.update(dt, this.player.camera.position);
     this.scene.render();
     this.updateFps(dt);
+    this.updatePerf(dt);
+    // Chunk-border debug overlay: rebuilt only when the player crosses a chunk
+    // boundary, so the per-frame cost is negligible when open.
+    this.chunkBorders.update(
+      this.player.position.x,
+      this.player.position.z,
+      this.player.position.y,
+      (cb) => this.world?.forEachChunkCoord(cb),
+    );
   };
 
   private update(dt: number): void {
     const world = this.world!;
     const mode = this.settings.mode;
     this.player.update(dt, world, this.input, this.settings);
-    world.update(this.player.position.x, this.player.position.z, this.settings.viewDistance);
+    world.update(this.player.position.x, this.player.position.z, this.settings.viewDistance, dt * 1000);
 
     if (this.breakCooldown > 0) this.breakCooldown -= dt;
 
@@ -751,16 +829,97 @@ export class Game {
   // --------------------------------------------------------- screens ---
 
   private updateFog(): void {
-    const far = this.settings.viewDistance * 16 * 1.7;
+    // Fog is the primary tool for hiding chunk pop-in. The terrain shader
+    // replicates Babylon's linear fog manually (driven by uFogStart/uFogEnd
+    // pushed each frame from these scene values), and the water/StandardMaterial
+    // pass uses scene fog directly. End the fog a bit beyond the render distance
+    // so the freshest chunks fade in under cover instead of popping.
+    if (!this.settings.graphics.fog) {
+      // Disabling fog: push the range out so the fog mix ≈ 1 (no tint) while
+      // keeping the uniforms consistent for both shader paths.
+      this.scene.fogStart = 0;
+      this.scene.fogEnd = 1e6;
+      return;
+    }
+    const far = this.settings.viewDistance * 16 * 2.0;
+    // Higher presets get a later fog start → clearer mid-distance terrain and
+    // less of the washed-out haze. Low keeps an earlier start to hide the
+    // pop-in that comes with its shorter render distance.
+    const startFrac =
+      this.settings.graphics.preset === "high" ? 0.6 :
+      this.settings.graphics.preset === "low" ? 0.42 : 0.5;
     this.scene.fogEnd = far;
-    this.scene.fogStart = far * 0.4;
+    this.scene.fogStart = far * startFrac;
   }
 
   private updateFps(dt: number): void {
     if (dt <= 0) return;
     const instant = 1 / dt;
     this.fpsEma += (instant - this.fpsEma) * 0.1;
+    this.frameMsEma += (dt * 1000 - this.frameMsEma) * 0.1;
     if (this.settings.showFps) this.hud.setFps(Math.round(this.fpsEma));
+  }
+
+  /** Throttled (~10 Hz) perf-overlay refresh. Cheap on its own; the per-frame
+   *  scene counters come from Babylon's active-mesh tracking. */
+  private updatePerf(dt: number): void {
+    this.perfTimer += dt;
+    if (this.perfTimer < 0.1) return;
+    this.perfTimer = 0;
+    if (!this.perf.isOpen) return;
+    this.perf.update(this.buildPerfSnapshot());
+  }
+
+  private buildPerfSnapshot(): PerfSnapshot {
+    const scene = this.scene;
+    const active = scene.getActiveMeshes();
+    const activeSet = new Set<AbstractMesh>();
+    for (let i = 0; i < active.length; i++) activeSet.add(active.data[i]);
+    const stats = this.world
+      ? this.world.chunkStats(activeSet)
+      : { loaded: 0, meshed: 0, dirty: 0, visible: 0 };
+    const shadowsEnabled = !!this.lighting?.shadowsEnabled;
+    const casters = shadowsEnabled ? this.lighting!.shadows.casterCount : 0;
+    const g = this.settings.graphics;
+    const eng = this.renderer.engine;
+    const gl = eng.getGlInfo();
+    const dn = this.lighting?.dayNight;
+    // JS heap is Chrome-only; report null elsewhere rather than misleading 0.
+    const mem = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+    return {
+      fps: this.fpsEma,
+      frameMs: this.frameMsEma,
+      activeMeshes: active.length,
+      totalMeshes: scene.meshes.length,
+      triangles: Math.round(scene.getActiveIndices() / 3),
+      drawEstimate: active.length + casters,
+      loadedChunks: stats.loaded,
+      meshedChunks: stats.meshed,
+      visibleChunks: stats.visible,
+      culledChunks: Math.max(0, stats.meshed - stats.visible),
+      meshQueue: stats.dirty,
+      lightQueue: this.world?.lightDirtyCount ?? 0,
+      shadowCasters: casters,
+      shadowsEnabled,
+      waterMeshes: this.world?.waterMeshCount ?? 0,
+      preset: g.preset,
+      viewDistance: this.settings.viewDistance,
+      renderScale: g.renderScale,
+      dpr: Math.min(window.devicePixelRatio || 1, g.dprCap),
+      renderWidth: eng.getRenderWidth(),
+      renderHeight: eng.getRenderHeight(),
+      heapUsedMB: mem ? mem.usedJSHeapSize / 1_048_576 : null,
+      gpuRenderer: gl?.renderer || null,
+      timeOfDay: dn?.timeOfDay ?? 0.5,
+      fogStart: scene.fogStart,
+      fogEnd: scene.fogEnd,
+      ambientIntensity: dn?.ambientIntensity ?? 0,
+      sunIntensity: dn?.sunIntensity ?? 0,
+      dayFactor: dn?.dayFactor ?? 1,
+      waterAlpha: this.world?.waterShader.currentAlpha ?? 1,
+      waterQuality: this.world?.waterShader.currentQuality ?? "—",
+      antiAliasing: g.antiAliasing,
+    };
   }
 
   // ------------------------------------------------------ screenshot ---
@@ -784,6 +943,7 @@ export class Game {
     this.running = false;
     window.removeEventListener("resize", this.handleResize);
     this.input.dispose();
+    this.graphics.dispose();
     this.lighting?.dispose();
     this.world?.dispose();
     this.sky.dispose();
@@ -861,6 +1021,144 @@ export class Game {
     for (const m of (this.world as unknown as { root: { getChildMeshes: () => Mesh[] } }).root.getChildMeshes()) {
       m.material = mat;
     }
+  }
+
+  /**
+   * Render-debug wireframe overlay: switches the shared terrain + water
+   * materials to wireframe rendering. Useful for spotting hidden faces,
+   * overdraw and mesh efficiency. Toggle from the keyboard (N) or the console
+   * (`__voxl.wireframe()`).
+   */
+  _setWireframe(on: boolean): void {
+    this.wireframe = on;
+    if (!this.world) return;
+    this.world.terrainOpaque.material.wireframe = on;
+    this.world.terrainCutout.material.wireframe = on;
+    this.world.waterShader.material.wireframe = on;
+  }
+
+  toggleWireframe(): void {
+    this._setWireframe(!this.wireframe);
+    this.hud.showToast(this.wireframe ? "Wireframe: on" : "Wireframe: off");
+  }
+
+  /**
+   * Debug: toggle back-face culling on the OPAQUE terrain material. OFF by
+   * default (the known-correct setting for this scene's face winding). Provided
+   * so culling can be re-tested safely; if it reintroduces holes, leave it off.
+   */
+  _setTerrainCulling(on: boolean): void {
+    if (!this.world) return;
+    this.world.terrainOpaque.material.backFaceCulling = on;
+  }
+
+  /**
+   * Debug: force every loaded chunk mesh to render regardless of frustum
+   * culling (sets `alwaysSelectAsActiveMesh`). Use to confirm whether missing
+   * terrain is a frustum-culling problem vs a mesh/material problem. Affects
+   * existing + future chunk meshes.
+   */
+  _setRenderAllChunks(on: boolean): void {
+    this.world?.setRenderAllChunks(on);
+    this.hud.showToast(on ? "Frustum cull: BYPASS (render all)" : "Frustum cull: normal");
+  }
+
+  /**
+   * Debug: conservative "safe mode" to isolate terrain — disables shadows,
+   * simplifies clouds, disables foliage distance-cull, and bypasses frustum
+   * culling. Lets you confirm the terrain mesh alone renders correctly. Call
+   * again with `false` to restore the player's settings.
+   */
+  _safeMode(on: boolean): void {
+    if (on) {
+      this._safeModePrev = {
+        graphics: { ...this.settings.graphics },
+      };
+      this.applySettings({
+        graphics: {
+          ...this.settings.graphics,
+          shadows: "off",
+          clouds: "off",
+          foliage: "high",
+          antiAliasing: false,
+        },
+      });
+      this.world?.setRenderAllChunks(true);
+      this.perf.setVisible(true);
+    } else if (this._safeModePrev) {
+      this.applySettings({ graphics: this._safeModePrev.graphics });
+      this.world?.setRenderAllChunks(false);
+      this._safeModePrev = null;
+    }
+    this.hud.showToast(on ? "Safe mode ON (terrain isolation)" : "Safe mode OFF");
+  }
+  private _safeModePrev: { graphics: GraphicsSettings } | null = null;
+
+  /** Toggle the performance overlay from the console (`__voxl.perf()`). */
+  _togglePerf(on?: boolean): void {
+    this.perf.setVisible(on ?? !this.perf.isOpen);
+  }
+
+  /** Toggle the chunk-border debug overlay from the console. */
+  _toggleChunkBorders(on?: boolean): void {
+    this.chunkBorders.setVisible(on ?? !this.chunkBorders.isOpen);
+  }
+
+  // ---- Per-layer isolation toggles (for diagnosing patches/artifacts) ----
+
+  /** Debug: show/hide the entire water layer. */
+  _setWater(on: boolean): void {
+    this.world?.setWaterEnabled(on);
+    this.hud.showToast(on ? "Water: on" : "Water: off");
+  }
+
+  /** Debug: force water fully opaque + flat (isolate the water color). */
+  _setWaterOpaque(on: boolean): void {
+    this.world?.waterShader.setDebugOpaque(on);
+    this.hud.showToast(on ? "Water: opaque debug" : "Water: normal");
+  }
+
+  /** Debug: toggle distance fog. */
+  _setFog(on: boolean): void {
+    this.applySettings({ graphics: { ...this.settings.graphics, fog: on } });
+    this.hud.showToast(on ? "Fog: on" : "Fog: off");
+  }
+
+  /** Debug: toggle FXAA post-processing. */
+  _setPost(on: boolean): void {
+    this.applySettings({ graphics: { ...this.settings.graphics, antiAliasing: on } });
+    this.hud.showToast(on ? "Post (FXAA): on" : "Post (FXAA): off");
+  }
+
+  /** Debug: toggle real-time shadows. Routes through applySettings so the
+   *  shadow tier, the settings UI, and localStorage all stay in sync (terrain
+   *  can't receive shadows yet, so this currently only changes GPU cost, not the
+   *  look — useful to confirm that). */
+  _setShadows(on: boolean): void {
+    const current = this.settings.graphics.shadows;
+    const shadows = on ? (current !== "off" ? current : "medium") : "off";
+    this.applySettings({ graphics: { ...this.settings.graphics, shadows } });
+    this.hud.showToast(on ? "Shadows: on" : "Shadows: off");
+  }
+
+  /** Debug: log every chunk mesh's name + material + vertex count. */
+  _dumpMaterials(): void {
+    this.world?.dumpChunkMaterials();
+    this.hud.showToast("Dumped chunk materials (see console)");
+  }
+
+  /**
+   * Water audit for the console (`__voxl.waterStats()`): counts loaded chunks
+   * containing water and the total water block count, confirming whether the
+   * world actually generated oceans/lakes near the player. On-demand only (it
+   * scans every loaded block).
+   */
+  _waterStats(): unknown {
+    if (!this.world) return { error: "no world" };
+    const s = this.world.waterStats();
+    // eslint-disable-next-line no-console
+    console.log("[water]", s);
+    return s;
   }
 
   /** TEMP debug: inspect interaction state. */

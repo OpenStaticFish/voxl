@@ -24,6 +24,20 @@ function boot(): void {
     // Lighting debug surface (see LightingSystem).
     lighting?: () => unknown;
     debugInfo?: () => Record<string, unknown>;
+    // Render-debug toggles.
+    wireframe?: (on?: boolean) => void;
+    perf?: (on?: boolean) => void;
+    waterStats?: () => unknown;
+    chunkBorders?: (on?: boolean) => void;
+    terrainCulling?: (on?: boolean) => void;
+    renderAllChunks?: (on?: boolean) => void;
+    safeMode?: (on?: boolean) => void;
+    water?: (on?: boolean) => void;
+    waterOpaque?: (on?: boolean) => void;
+    fog?: (on?: boolean) => void;
+    post?: (on?: boolean) => void;
+    shadows?: (on?: boolean) => void;
+    dumpMaterials?: () => void;
   }
   (window as unknown as { __voxl?: VoxlAutomation }).__voxl = {
     beginPlay: () => game.beginPlay(),
@@ -35,6 +49,19 @@ function boot(): void {
     loadedChunks: () => game._loadedChunks(),
     lighting: () => game._lightingDebug(),
     debugInfo: () => game._debugInfo(),
+    wireframe: (on) => game._setWireframe(on ?? true),
+    perf: (on) => game._togglePerf(on),
+    waterStats: () => game._waterStats(),
+    chunkBorders: (on) => game._toggleChunkBorders(on),
+    terrainCulling: (on) => game._setTerrainCulling(on ?? true),
+    renderAllChunks: (on) => game._setRenderAllChunks(on ?? true),
+    safeMode: (on) => game._safeMode(on ?? true),
+    water: (on) => game._setWater(on ?? true),
+    waterOpaque: (on) => game._setWaterOpaque(on ?? true),
+    fog: (on) => game._setFog(on ?? true),
+    post: (on) => game._setPost(on ?? true),
+    shadows: (on) => game._setShadows(on ?? true),
+    dumpMaterials: () => game._dumpMaterials(),
   };
 }
 

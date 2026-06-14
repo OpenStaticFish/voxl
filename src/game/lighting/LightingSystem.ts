@@ -54,17 +54,26 @@ export class LightingSystem {
     // Visuals: sun/moon discs + sky dome gradient.
     this.celestial.update(cameraPosition, dn);
     this.sky.setDomeColours(dn.skyZenith, dn.skyHorizon);
+    // Clouds are unlit, so push the day/night factor so they dim at night.
+    this.sky.setCloudDayFactor(dn.dayFactor);
 
     // Terrain shader uniforms: sun channel × dayFactor (+ moonlight floor),
-    // block channel untouched. Fog tracks the horizon colour.
+    // block channel untouched. Fog tracks the horizon colour. Pushed to BOTH the
+    // opaque and cutout terrain materials so the two passes stay in lock-step.
     const fogColor: Color3 = dn.skyHorizon;
-    this.world.terrainMaterial.setDayNight(dn.dayFactor, dn.moonFactor);
-    this.world.terrainMaterial.setFog(
+    this.world.setTerrainDayNight(dn.dayFactor, dn.moonFactor);
+    this.world.setTerrainFog(
       cameraPosition,
       fogColor,
       this.scene.fogStart,
       this.scene.fogEnd,
     );
+
+    // Water uses a plain StandardMaterial, so day/night + fog are handled by
+    // the scene lights/fog (not custom uniforms). These calls are retained as
+    // no-ops for API compatibility (WaterMaterial ignores them).
+    this.world.waterShader.setDayNight(dn.dayFactor, dn.moonFactor);
+    this.world.waterShader.setFog(cameraPosition, fogColor, this.scene.fogStart, this.scene.fogEnd);
 
     // Shadows are dormant unless explicitly enabled (terrain uses voxel sunlight).
     this.shadows.update(playerX, playerY, playerZ);
