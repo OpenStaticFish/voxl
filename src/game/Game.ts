@@ -598,7 +598,7 @@ export class Game {
     }
     const changed = this.world!.setBlock(t.px, t.py, t.pz, block);
     dbg("  setBlock block=" + block + " -> changed=" + changed);
-    if (this.settings.mode === "survival") {
+    if (changed && this.settings.mode === "survival") {
       this.inventory.consumeOne(this.selectedIndex);
       this.refreshHud();
     }

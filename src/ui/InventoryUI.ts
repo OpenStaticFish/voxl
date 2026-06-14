@@ -138,7 +138,8 @@ export class InventoryUI {
   private makeTrash(): HTMLElement {
     const trash = el("div", "slot slot-trash");
     trash.title = "Trash — click with a held stack to destroy it";
-    trash.textContent = "🗑";
+    trash.innerHTML =
+      '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M9 3v1H4v2h1v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6h1V4h-5V3H9zm2 2h2v1h-2V5zM8 8h2v10H8V8zm4 0h2v10h-2V8zm4 0h2v10h-2V8z"/></svg>';
     trash.addEventListener("mousedown", (e) => {
       e.preventDefault();
       if (this.held) {

@@ -174,7 +174,10 @@ export class Input {
   };
 
   private handleWheel = (e: WheelEvent): void => {
-    if (!this._locked) return;
+    // Cycle the hotbar whether or not pointer lock is held (cursor-aiming mode
+    // included). Let visible UI overlays (e.g. the inventory) scroll normally.
+    const t = e.target as Element | null;
+    if (t && t.closest && t.closest(".screen:not([hidden])")) return;
     e.preventDefault();
     this.onScroll?.(e.deltaY > 0 ? 1 : -1);
   };
