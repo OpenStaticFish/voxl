@@ -122,10 +122,6 @@ export class Sky {
     this.domeMat.setVector3("bottomColor", this._horVec);
   }
 
-  setCloudsEnabled(enabled: boolean): void {
-    this.clouds.setEnabled(enabled);
-  }
-
   /** Push the day/night brightness factor to the cloud layer. */
   setCloudDayFactor(dayFactor: number): void {
     this.clouds.setDayFactor(dayFactor);

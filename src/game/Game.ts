@@ -42,7 +42,7 @@ import { Menus } from "../ui/Menus";
 import { InventoryUI } from "../ui/InventoryUI";
 import { loadSettings, saveSettings } from "../state/Settings";
 import { LightingSystem } from "./lighting/LightingSystem";
-import { GraphicsController, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE } from "./graphics/GraphicsController";
+import { GraphicsController, MAX_RENDER_DISTANCE, MIN_RENDER_DISTANCE, presetRenderDistance } from "./graphics/GraphicsController";
 import { graphicsFromPreset, type GraphicsPreset, type GraphicsSettings } from "./graphics/GraphicsSettings";
 import { PerfOverlay, type PerfSnapshot } from "../ui/PerfOverlay";
 import { ChunkBorderOverlay } from "../ui/ChunkBorderOverlay";
@@ -270,12 +270,14 @@ export class Game {
   }
 
   /**
-   * Switch to a built-in preset (low/medium/high) and also nudge the render
-   * distance to the preset's recommended value. Used by the settings UI.
+   * Switch to a built-in preset (low/medium/high): applies the full graphics
+   * config AND nudges the render distance to the preset's recommended value,
+   * so a "Low" preset is actually faster (shorter view) and "High" reaches
+   * further. Used by the settings UI.
    */
   applyGraphicsPreset(preset: GraphicsPreset): void {
     const graphics: GraphicsSettings = graphicsFromPreset(preset);
-    this.applySettings({ graphics });
+    this.applySettings({ graphics, viewDistance: presetRenderDistance(preset) });
   }
 
   // ------------------------------------------------------ game states ---

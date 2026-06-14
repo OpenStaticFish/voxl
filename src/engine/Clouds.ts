@@ -216,14 +216,14 @@ export class Clouds {
     const addQuad = (
       ax: number, ay: number, az: number,
       bx: number, by: number, bz: number,
-      c: number, cy: number, cz: number,
+      cx2: number, cy2: number, cz2: number,
       dx: number, dy: number, dz: number,
       color: Color3,
     ): void => {
       const o = v * 3;
       pos[o] = ax; pos[o + 1] = ay; pos[o + 2] = az;
       pos[o + 3] = bx; pos[o + 4] = by; pos[o + 5] = bz;
-      pos[o + 6] = c; pos[o + 7] = cy; pos[o + 8] = cz;
+      pos[o + 6] = cx2; pos[o + 7] = cy2; pos[o + 8] = cz2;
       pos[o + 9] = dx; pos[o + 10] = dy; pos[o + 11] = dz;
       const co = v * 4;
       for (let i = 0; i < 4; i++) {

@@ -176,9 +176,10 @@ function pushFace(
   const du = uv.u1 - uv.u0;
   const dv = uv.v1 - uv.v0;
   const base = b.vertexCount;
-  // Water pass keeps a single scalar brightness (its material is Standard). The
-  // opaque/cutout pass bakes two channels: r=shadedSun g=shadedBlock b=sunLevel
-  // a=blockLevel, consumed by the VoxelTerrainMaterial shader.
+  // All faces currently bake the same four-channel colour data
+  // (r=shadedSun, g=shadedBlock, b=sunLevel, a=blockLevel) consumed by the
+  // VoxelTerrainMaterial shader. The water (transparent) pass's colours are
+  // discarded later (World strips them) since water uses a plain StandardMaterial.
   let cr: number, cg: number, cb: number, ca: number;
   if (twoChannel) {
     cr = sample.sunBright;
@@ -304,8 +305,8 @@ export function buildChunkGeometry(
           // exposed to (the neighbour air/space), combined with face shade.
           const sample = sampleBrightness(nwx, nwy, nwz, FACE_BRIGHTNESS[f]);
           const isWaterTop = def.liquid && n[1] === 1;
-          // Water keeps a single scalar brightness; opaque/cutout bake two
-          // light channels for the VoxelTerrainMaterial shader.
+          // All faces bake four-channel light colours; the water pass discards
+          // them (World strips the colour kind) since it uses a StandardMaterial.
           pushFace(builder, f, wx, wy, wz, def.tiles[f], sample, true, isWaterTop);
         }
       }

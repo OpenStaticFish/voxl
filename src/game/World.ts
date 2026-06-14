@@ -25,6 +25,7 @@ import {
 } from "./lighting/LightingConfig";
 import type { FoliageDensity, WaterQuality } from "./graphics/GraphicsSettings";
 import { dbg } from "../state/Debug";
+import { WATER_BLOCK } from "./Blocks";
 
 function key(cx: number, cz: number): string {
   return `${cx},${cz}`;
@@ -44,11 +45,14 @@ interface ChunkMeshes {
 export class World {
   readonly root: TransformNode;
   /**
-   * Two terrain material instances sharing one shader, differing only in
-   * back-face culling:
-   *   - {@link terrainOpaque} culls back faces (the bulk of terrain — saves
-   *     drawing every cube's invisible interior).
-   *   - {@link terrainCutout} is double-sided (plant crosses need both sides).
+   * Two terrain material instances sharing one shader. Both are currently
+   * DOUBLE-SIDED (back-face culling OFF): an earlier attempt enabled culling on
+   * the opaque pass, but this mesher's face winding does not match Babylon's
+   * front-face convention, so culling removed visible faces and punched holes
+   * through the terrain. Culling stays off until the winding is fixed; a debug
+   * toggle (`__voxl.terrainCulling(on)`) re-enables it for testing.
+   *   - {@link terrainOpaque} — terrain cube faces.
+   *   - {@link terrainCutout} — plant crosses (must be double-sided anyway).
    * Day/night + fog + debug uniforms are forwarded to BOTH each frame.
    */
   readonly terrainOpaque: VoxelTerrainMaterial;
@@ -557,9 +561,6 @@ export class World {
       // it once: Babylon skips the per-frame parent×local matrix multiply for
       // every static chunk mesh — a large saving with hundreds of chunks.
       mesh.freezeWorldMatrix();
-      // Cutout (plantlike) passes only the alpha-test path; it never casts the
-      // kind of shadow worth paying for, so keep it out of shadow render lists.
-      if (slot === "cutout") mesh.receiveShadows = false;
       entry[slot] = mesh;
     }
   }
@@ -660,11 +661,10 @@ export class World {
   waterStats(): { chunksWithWater: number; waterBlocks: number; loaded: number } {
     let chunksWithWater = 0;
     let waterBlocks = 0;
-    const WATER = 7;
     for (const chunk of this.chunks.values()) {
       let local = 0;
       const b = chunk.blocks;
-      for (let i = 0; i < b.length; i++) if (b[i] === WATER) local++;
+      for (let i = 0; i < b.length; i++) if (b[i] === WATER_BLOCK) local++;
       if (local > 0) { chunksWithWater++; waterBlocks += local; }
     }
     return { chunksWithWater, waterBlocks, loaded: this.chunks.size };

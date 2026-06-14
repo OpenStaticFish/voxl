@@ -71,8 +71,9 @@ export class LightingSystem {
       this.scene.fogEnd,
     );
 
-    // Water shader uniforms mirror the terrain so the two surfaces stay in sync
-    // through the day/night cycle, plus an advancing animation clock.
+    // Water uses a plain StandardMaterial, so day/night + fog are handled by
+    // the scene lights/fog (not custom uniforms). These calls are retained as
+    // no-ops for API compatibility (WaterMaterial ignores them).
     this.elapsed += dt;
     this.world.waterShader.setDayNight(dn.dayFactor, dn.moonFactor);
     this.world.waterShader.setFog(cameraPosition, fogColor, this.scene.fogStart, this.scene.fogEnd);
