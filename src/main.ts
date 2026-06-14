@@ -21,6 +21,8 @@ function boot(): void {
     // Debug hooks (not part of the gameplay API).
     debugFlat?: () => void;
     loadedChunks?: () => unknown;
+    // Lighting debug surface (see LightingSystem).
+    lighting?: () => unknown;
     debugInfo?: () => Record<string, unknown>;
   }
   (window as unknown as { __voxl?: VoxlAutomation }).__voxl = {
@@ -31,6 +33,7 @@ function boot(): void {
     takeScreenshot: () => game.takeScreenshot(),
     debugFlat: () => game._enableDebugFlat(),
     loadedChunks: () => game._loadedChunks(),
+    lighting: () => game._lightingDebug(),
     debugInfo: () => game._debugInfo(),
   };
 }

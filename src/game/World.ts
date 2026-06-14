@@ -13,6 +13,14 @@ import type { BlockId } from "../types";
 import { Chunk } from "./Chunk";
 import { buildChunkGeometry } from "./ChunkMesher";
 import { TerrainGenerator, findGroundY } from "./TerrainGenerator";
+import { VoxelLightEngine, lightKey } from "./lighting/VoxelLightEngine";
+import { VoxelTerrainMaterial } from "./lighting/VoxelTerrainMaterial";
+import {
+  LIGHT_MAX,
+  MAX_CHUNK_LIGHT_PER_FRAME,
+  lightToBrightness,
+  type LightDebugMode,
+} from "./lighting/LightingConfig";
 
 function key(cx: number, cz: number): string {
   return `${cx},${cz}`;
@@ -31,8 +39,12 @@ interface ChunkMeshes {
  */
 export class World {
   readonly root: TransformNode;
-  readonly opaqueMaterial: StandardMaterial;
-  readonly cutoutMaterial: StandardMaterial;
+  /**
+   * Opaque + cutout terrain use a custom two-channel shader (sun channel ×
+   * dayFactor, block channel unaffected by night) so the day/night cycle never
+   * forces a chunk remesh. Water stays on a plain StandardMaterial.
+   */
+  readonly terrainMaterial: VoxelTerrainMaterial;
   readonly waterMaterial: StandardMaterial;
   readonly generator: TerrainGenerator;
   /** Atlas must have hasAlpha=true for the cutout pass to alpha-test. */
@@ -43,41 +55,29 @@ export class World {
   private readonly meshes = new Map<string, ChunkMeshes>();
   private spiralCache = new Map<number, Array<{ dx: number; dz: number; d: number }>>();
 
+  /** Voxel light field (sun + block light per chunk). Drives mesh brightness. */
+  readonly lighting = new VoxelLightEngine((x, y, z) => this.getBlock(x, y, z));
+  /** Chunks whose lighting must be recomputed before they (re)mesh. */
+  private readonly lightDirty = new Set<string>();
+  /** Active light debug overlay (applied as a material uniform — no remesh). */
+  private lightDebugMode: LightDebugMode = "off";
+
   constructor(seed: string, atlas: Texture, scene: Scene) {
     this.scene = scene;
     this.root = new TransformNode("world-root", scene);
     this.generator = new TerrainGenerator(seed);
 
     // The atlas uses clearRect for plantlike tiles; we need alpha for cutout.
-    // Mark hasAlpha once so the cutout material can alpha-test against it.
     atlas.hasAlpha = true;
     this.atlasHasAlpha = true;
 
-    // Opaque pass: textured + vertex-coloured, no specular (Lambert-like).
-    // (Babylon applies vertex colors automatically when the mesh has a color
-    // vertex buffer, so no useVertexColor flag is needed.)
-    // Explicit MATERIAL_OPAQUE ensures the texture's alpha channel is ignored
-    // even though we set hasAlpha=true above (shared atlas).
-    this.opaqueMaterial = new StandardMaterial("voxel-opaque", scene);
-    this.opaqueMaterial.diffuseTexture = atlas;
-    this.opaqueMaterial.specularColor = new Color3(0, 0, 0);
-    this.opaqueMaterial.useAlphaFromDiffuseTexture = false;
-    this.opaqueMaterial.backFaceCulling = false;
-    this.opaqueMaterial.transparencyMode = Material.MATERIAL_OPAQUE;
-
-    // Cutout pass: plantlike decorations (alpha-tested, double-sided).
-    // MATERIAL_ALPHATEST hard-cuts fragments below alphaCutOff without
-    // blending — exactly the prior three.js alphaTest behaviour.
-    this.cutoutMaterial = new StandardMaterial("voxel-cutout", scene);
-    this.cutoutMaterial.diffuseTexture = atlas;
-    this.cutoutMaterial.specularColor = new Color3(0, 0, 0);
-    this.cutoutMaterial.useAlphaFromDiffuseTexture = true;
-    this.cutoutMaterial.alphaCutOff = 0.5;
-    this.cutoutMaterial.backFaceCulling = false;
-    this.cutoutMaterial.transparencyMode = Material.MATERIAL_ALPHATEST;
+    // Custom terrain shader for opaque + cutout passes. Both share one material
+    // instance: opaque tiles have alpha=1 (never discarded), plant tiles have
+    // alpha=0 backgrounds (discarded by the alpha test), so a single 0.5 cutoff
+    // handles both cube faces and the plantlike X-cross.
+    this.terrainMaterial = new VoxelTerrainMaterial(scene, { texture: atlas, alphaCutOff: 0.5 });
 
     // Transparent pass: water (alpha-blended, no depth write, double-sided).
-    // MATERIAL_ALPHABLEND uses material.alpha as a uniform opacity.
     this.waterMaterial = new StandardMaterial("voxel-water", scene);
     this.waterMaterial.diffuseTexture = atlas;
     this.waterMaterial.specularColor = new Color3(0, 0, 0);
@@ -86,6 +86,10 @@ export class World {
     this.waterMaterial.disableDepthWrite = true;
     this.waterMaterial.transparencyMode = Material.MATERIAL_ALPHABLEND;
   }
+
+  /** The opaque + cutout ShaderMaterial (shared). */
+  get opaqueMaterial(): Material { return this.terrainMaterial.material; }
+  get cutoutMaterial(): Material { return this.terrainMaterial.material; }
 
   private spiral(radius: number): Array<{ dx: number; dz: number; d: number }> {
     const cached = this.spiralCache.get(radius);
@@ -127,13 +131,17 @@ export class World {
     const lz = wz - cz * CHUNK_SIZE;
     const changed = chunk.setLocal(lx, wy, lz, id);
     if (!changed) return false;
-    // Remesh this chunk, plus neighbors if the edit was on a border (their
-    // border faces may need to appear/disappear).
+    // Re-light the edited chunk (and queue neighbours — a changed cell can
+    // alter light several blocks away). Relighting marks the chunk dirty if any
+    // light value changed, which triggers a remesh below.
+    this.relightChunkNow(chunk, true);
+    // Remesh this chunk, plus neighbours if the edit was on a border (their
+    // border faces / lighting may need to update).
     chunk.dirty = true;
-    if (lx === 0) this.markDirty(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) this.markDirty(cx + 1, cz);
-    if (lz === 0) this.markDirty(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) this.markDirty(cx, cz + 1);
+    if (lx === 0) this.queueNeighbourLight(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this.queueNeighbourLight(cx + 1, cz);
+    if (lz === 0) this.queueNeighbourLight(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this.queueNeighbourLight(cx, cz + 1);
     this.rebuildMesh(chunk);
     return true;
   }
@@ -141,6 +149,99 @@ export class World {
   private markDirty(cx: number, cz: number): void {
     const chunk = this.chunks.get(key(cx, cz));
     if (chunk && chunk.generated) chunk.dirty = true;
+  }
+
+  // --------------------------------------------------------- lighting ---
+
+  /**
+   * Per-vertex light sample handed to the mesher. Bakes the sun + block light
+   * of the sampled cell (times the face shade and brightness curve) into two
+   * channels, plus the raw 0..1 levels for the debug overlay.
+   *
+   * Sun light is baked at FULL day strength here; the actual day/night dimming
+   * is applied later in the VoxelTerrainMaterial shader via the `uDayFactor`
+   * uniform — so the clock can sweep a whole day without rebuilding any mesh.
+   */
+  private readonly sampleBrightness = (wx: number, wy: number, wz: number, shade: number) => {
+    const sun = this.lighting.getSun(wx, wy, wz);
+    const block = this.lighting.getBlockLight(wx, wy, wz);
+    return {
+      sunBright: shade * lightToBrightness(sun),
+      blockBright: shade * lightToBrightness(block),
+      sunLevel: sun / LIGHT_MAX,
+      blockLevel: block / LIGHT_MAX,
+    };
+  };
+
+  /**
+   * Synchronously re-light `chunk` now. When `markNeighboursAlways` is set
+   * (chunk just generated) the 4 neighbours are queued for re-light so they
+   * pick up the new boundary light; otherwise neighbours are only queued when a
+   * border value actually changed.
+   */
+  private relightChunkNow(chunk: Chunk, markNeighboursAlways: boolean): void {
+    const result = this.lighting.relightChunk(chunk);
+    if (result.changed) chunk.dirty = true;
+    if (markNeighboursAlways || result.borderChanged) {
+      this.queueNeighbourLight(chunk.cx - 1, chunk.cz);
+      this.queueNeighbourLight(chunk.cx + 1, chunk.cz);
+      this.queueNeighbourLight(chunk.cx, chunk.cz - 1);
+      this.queueNeighbourLight(chunk.cx, chunk.cz + 1);
+    }
+  }
+
+  /** Queue a chunk (and mark it remesh-dirty) for re-lighting if generated. */
+  private queueNeighbourLight(cx: number, cz: number): void {
+    const chunk = this.chunks.get(key(cx, cz));
+    if (chunk && chunk.generated) this.lightDirty.add(key(cx, cz));
+  }
+
+  /**
+   * Drain the light-dirty queue with a per-frame budget. Each re-lit chunk may
+   * queue its neighbours (only when a border value changed), so light updates
+   * ripple outward and converge in a few frames rather than in one big stall.
+   */
+  private processLightDirty(budget: number): void {
+    if (this.lightDirty.size === 0) return;
+    let remaining = budget;
+    // Snapshot so we can safely add to the set while iterating.
+    const batch = [...this.lightDirty];
+    this.lightDirty.clear();
+    for (const k of batch) {
+      if (remaining <= 0) {
+        // Re-queue for next frame (keep closest-first ordering loosely).
+        this.lightDirty.add(k);
+        continue;
+      }
+      const chunk = this.chunks.get(k);
+      if (!chunk || !chunk.generated) continue;
+      this.relightChunkNow(chunk, false);
+      remaining--;
+    }
+  }
+
+  /**
+   * Switch the light debug overlay. This is a shader uniform on the terrain
+   * material (the raw levels are already baked into vertex-colour .ba), so it
+   * toggles instantly with NO chunk remesh.
+   */
+  setLightDebugMode(mode: LightDebugMode): void {
+    this.lightDebugMode = mode;
+    const code = mode === "sun" ? 1 : mode === "block" ? 2 : mode === "combined" ? 3 : 0;
+    const tint =
+      mode === "sun" ? new Color3(1.0, 0.85, 0.4) :
+      mode === "block" ? new Color3(1.0, 0.7, 0.35) :
+      new Color3(1, 1, 1);
+    this.terrainMaterial.setDebugMode(code, tint);
+  }
+
+  getLightDebugMode(): LightDebugMode {
+    return this.lightDebugMode;
+  }
+
+  /** Number of chunks queued for re-lighting (debug overlay). */
+  get lightDirtyCount(): number {
+    return this.lightDirty.size;
   }
 
   /** Highest non-air, non-water block at a column (for spawn placement). */
@@ -160,6 +261,8 @@ export class World {
     }
     if (!chunk.generated) {
       this.generator.generate(chunk);
+      // Light the new chunk immediately so spawn-area meshes are correct.
+      this.relightChunkNow(chunk, true);
       // Mark already-meshed neighbors dirty so shared borders remesh correctly.
       this.markDirty(cx - 1, cz);
       this.markDirty(cx + 1, cz);
@@ -191,6 +294,9 @@ export class World {
       }
       if (!chunk.generated) {
         this.generator.generate(chunk);
+        // Light the freshly generated chunk before it can be meshed, and queue
+        // neighbours so seams stay correct as chunks stream in.
+        this.relightChunkNow(chunk, true);
         this.markDirty(cx - 1, cz);
         this.markDirty(cx + 1, cz);
         this.markDirty(cx, cz - 1);
@@ -198,6 +304,10 @@ export class World {
         genBudget--;
       }
     }
+
+    // Propagate queued light updates (closest-first budget) BEFORE meshing so
+    // meshes always read fresh light values.
+    this.processLightDirty(MAX_CHUNK_LIGHT_PER_FRAME);
 
     // Mesh dirty chunks (closest first), respecting the budget.
     for (const off of order) {
@@ -220,12 +330,18 @@ export class World {
       if (ddx * ddx + ddz * ddz > unloadSq) {
         this.disposeMeshes(k);
         this.chunks.delete(k);
+        this.lighting.removeLight(chunk.cx, chunk.cz);
+        this.lightDirty.delete(k);
       }
     }
   }
 
   private rebuildMesh(chunk: Chunk): void {
-    const result = buildChunkGeometry(chunk, (x, y, z) => this.getBlock(x, y, z));
+    const result = buildChunkGeometry(
+      chunk,
+      (x, y, z) => this.getBlock(x, y, z),
+      this.sampleBrightness,
+    );
     const k = key(chunk.cx, chunk.cz);
     const existing = this.meshes.get(k);
 
@@ -261,8 +377,26 @@ export class World {
       mesh.material = material;
       mesh.parent = this.root;
       mesh.isPickable = false;
+      // Terrain uses a custom shader (no Babylon shadow receiving); water is
+      // alpha-blended. Either way, nothing here receives Babylon shadow maps.
+      mesh.receiveShadows = false;
       vd.applyToMesh(mesh, false);
       entry[slot] = mesh;
+    }
+  }
+
+  /**
+   * Iterate every loaded chunk's opaque mesh + chunk coords. Used by the shadow
+   * manager to keep the shadow render list limited to nearby casters.
+   */
+  forEachOpaqueMesh(cb: (cx: number, cz: number, mesh: Mesh) => void): void {
+    for (const [k, entry] of this.meshes) {
+      const m = entry.opaque;
+      if (!m) continue;
+      const comma = k.indexOf(",");
+      const cx = parseInt(k.slice(0, comma), 10);
+      const cz = parseInt(k.slice(comma + 1), 10);
+      cb(cx, cz, m);
     }
   }
 
@@ -284,8 +418,9 @@ export class World {
   dispose(): void {
     for (const k of [...this.meshes.keys()]) this.disposeMeshes(k);
     this.chunks.clear();
-    this.opaqueMaterial.dispose();
-    this.cutoutMaterial.dispose();
+    this.lightDirty.clear();
+    this.lighting.dispose();
+    this.terrainMaterial.dispose();
     this.waterMaterial.dispose();
     this.root.dispose();
   }

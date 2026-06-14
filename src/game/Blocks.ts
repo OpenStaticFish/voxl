@@ -50,7 +50,44 @@ const T = {
   JUNGLE_GRASS_SIDE: 30,
   JUNGLE_LEAVES: 31,
   MOSSY_STONE: 32,
+  GLOWSTONE: 33,
 } as const;
+
+/**
+ * Lighting behaviour for a block (Minetest/Luanti-style). These fields drive
+ * the voxel light engine (see src/game/lighting/) — they do NOT affect Babylon
+ * real-time lights directly.
+ *
+ * Light is stored in two channels per voxel: sunlight (sky light) and block
+ * light (emitted light). Both range 0..MAX_LIGHT (15).
+ */
+export interface BlockLightDefinition {
+  /**
+   * Whether sunlight may pass straight down through this block without being
+   * broken (Minetest `sunlight_propagates`). Air/glass/water = true; leaves can
+   * be true so canopies stay bright on top while still attenuating sideways.
+   * Default: true for air and non-opaque blocks, false for opaque blocks.
+   */
+  sunlightPassesThrough?: boolean;
+  /**
+   * Whether ANY light (sun or block) spreads INTO this block (i.e. the block is
+   * part of the light-conducting space). Opaque blocks are false. Air/water/
+   * leaves/plants = true. Default: !opaque.
+   */
+  lightPassesThrough?: boolean;
+  /** Light this block emits into the block-light channel (0..15). Default 0. */
+  lightEmission?: number;
+  /**
+   * Extra light attenuation applied when light spreads through this block, on
+   * top of the default -1/step decay (Minetest has no direct equivalent; this
+   * is an extension point for "dense" media like deep water). Default 0.
+   */
+  lightAbsorption?: number;
+  /** Whether this block should be added to the shadow render list. Default true. */
+  castsShadows?: boolean;
+  /** Whether this block's faces receive Babylon shadow mapping. Default true. */
+  receivesShadows?: boolean;
+}
 
 export interface BlockDef {
   id: BlockId;
@@ -69,6 +106,8 @@ export interface BlockDef {
   liquid: boolean;
   /** Render shape: cube (default) or plantlike (X-cross of two quads). */
   shape?: "plantlike";
+  /** Voxel lighting behaviour. Omitted fields resolve to documented defaults. */
+  light?: BlockLightDefinition;
 }
 
 function uniform(tile: number): readonly [number, number, number, number, number, number] {
@@ -147,6 +186,11 @@ export const BLOCKS: readonly BlockDef[] = [
     opaque: true,
     transparent: false,
     liquid: false,
+    // Leaves stay opaque for face culling, but let light spread THROUGH them
+    // (Minetest: light_propagates). Sunlight does NOT pass straight down
+    // (sunlightPassesThrough defaults to !opaque = false), so a thick canopy
+    // dims the ground below while still letting scattered light bleed in.
+    light: { lightPassesThrough: true },
   },
   {
     id: 7,
@@ -157,6 +201,9 @@ export const BLOCKS: readonly BlockDef[] = [
     opaque: false,
     transparent: true,
     liquid: true,
+    // Light spreads through water but sunlight does not pass unattenuated, so
+    // light decays with depth (deep water is dark).
+    light: { lightPassesThrough: true, sunlightPassesThrough: false },
   },
   {
     id: 8,
@@ -351,6 +398,7 @@ export const BLOCKS: readonly BlockDef[] = [
     opaque: true,
     transparent: false,
     liquid: false,
+    light: { lightPassesThrough: true },
   },
   {
     id: 27,
@@ -361,6 +409,19 @@ export const BLOCKS: readonly BlockDef[] = [
     opaque: true,
     transparent: false,
     liquid: false,
+  },
+  {
+    id: 28,
+    name: "Glowstone",
+    tiles: uniform(T.GLOWSTONE),
+    color: "#f4d97a",
+    solid: true,
+    opaque: true,
+    transparent: false,
+    liquid: false,
+    // Debug/test emissive block. Emits maximum block light so the block-light
+    // propagator can be observed (e.g. a lit radius inside a dark cave).
+    light: { lightEmission: 15 },
   },
 ];
 
@@ -376,3 +437,49 @@ export function isAir(id: BlockId): boolean {
 export function getBlock(id: BlockId): BlockDef {
   return BLOCKS[id] ?? AIR;
 }
+
+// ---------------------------------------------------------------------------
+// Lighting accessors (defaults resolved here so the engine never hardcodes
+// behaviour per block id). See BlockLightDefinition for the semantics.
+// ---------------------------------------------------------------------------
+
+const MAX_LIGHT = 15;
+
+/** Resolved (no-undefined) light definition for a block. */
+export interface ResolvedLight {
+  /** Sunlight may travel straight down through this block unbroken. */
+  sunlightPassesThrough: boolean;
+  /** Any light may spread into/through this block. */
+  lightPassesThrough: boolean;
+  /** Emitted block-light level (0..MAX_LIGHT). */
+  lightEmission: number;
+  /** Extra decay added per spread step through this block. */
+  lightAbsorption: number;
+  castsShadows: boolean;
+  receivesShadows: boolean;
+}
+
+const cache = new Map<BlockId, ResolvedLight>();
+
+/** Resolve a block's lighting definition with defaults applied. */
+export function resolveLight(def: BlockDef): ResolvedLight {
+  const hit = cache.get(def.id);
+  if (hit) return hit;
+  const l: BlockLightDefinition = def.light ?? {};
+  const resolved: ResolvedLight = {
+    sunlightPassesThrough: l.sunlightPassesThrough ?? !def.opaque,
+    lightPassesThrough: l.lightPassesThrough ?? !def.opaque,
+    lightEmission: clampLight(l.lightEmission ?? 0),
+    lightAbsorption: Math.max(0, l.lightAbsorption ?? 0),
+    castsShadows: l.castsShadows ?? true,
+    receivesShadows: l.receivesShadows ?? true,
+  };
+  cache.set(def.id, resolved);
+  return resolved;
+}
+
+export function clampLight(v: number): number {
+  return v < 0 ? 0 : v > MAX_LIGHT ? MAX_LIGHT : v;
+}
+
+export { MAX_LIGHT };
