@@ -20,6 +20,7 @@ services:
       dockerfile: Dockerfile
       target: dev
     container_name: voxl-game
+    user: "${UID:-1000}:${GID:-100}"
     # `vite` already binds 0.0.0.0:5173 (see vite.config.ts), so HMR Just Works.
     command: bun run game:dev
     ports:
@@ -39,6 +40,7 @@ services:
       dockerfile: website/Dockerfile
       target: dev
     container_name: voxl-site
+    user: "${UID:-1000}:${GID:-100}"
     working_dir: /app/website
     # The `dev` script runs sync:game (builds + copies the game) first, then
     # starts Astro bound to all interfaces so it's reachable from the host.
