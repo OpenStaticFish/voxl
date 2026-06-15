@@ -24,13 +24,12 @@ import { features, blockPalette } from "../data/site";
     </ul>
 
     <div class="palette" aria-labelledby="palette-title">
-      <h3 id="palette-title" class="palette-title">The creative palette</h3>
-      <p class="palette-sub">Nine blocks in the hotbar — select with <kbd>1</kbd>–<kbd>9</kbd>, scroll, or <kbd>F</kbd>.</p>
+      <h3 id="palette-title" class="palette-title">The creative inventory</h3>
+      <p class="palette-sub">{blockPalette.length} blocks, plants and foods — open the full grid with <kbd>E</kbd> in creative mode.</p>
       <ul class="palette-list">
-        {blockPalette.map((b, i) => (
+        {blockPalette.map((b) => (
           <li class="palette-block" title={b.name}>
             <span class="swatch" style={`background:${b.color}`}></span>
-            <span class="swatch-num">{i + 1}</span>
             <span class="swatch-name">{b.name}</span>
           </li>
         ))}
@@ -96,34 +95,30 @@ import { features, blockPalette } from "../data/site";
     margin: 0;
     padding: 0;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 0.6rem;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    gap: 0.5rem;
   }
   .palette-block {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.5rem 0.6rem;
+    gap: 0.55rem;
+    padding: 0.45rem 0.6rem;
     border: 1px solid var(--border-soft);
     border-radius: 9px;
     background: var(--bg-2);
     font-family: var(--mono);
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     color: var(--ink-dim);
     position: relative;
   }
   .swatch {
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     border-radius: 5px;
     box-shadow:
-      inset 0 -7px 0 rgba(0, 0, 0, 0.25),
+      inset 0 -6px 0 rgba(0, 0, 0, 0.25),
       inset 0 3px 0 rgba(255, 255, 255, 0.16);
     flex: none;
-  }
-  .swatch-num {
-    color: var(--ink-mute);
-    font-size: 0.72rem;
   }
   .swatch-name {
     color: var(--ink);

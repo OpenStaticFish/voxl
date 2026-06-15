@@ -1,0 +1,317 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { roadmap, phaseStatusLabel, site } from "../data/site";
+
+const legend = [
+  { status: "shipped", label: phaseStatusLabel.shipped, color: "var(--grass)" },
+  { status: "active", label: phaseStatusLabel.active, color: "var(--amber)" },
+  { status: "planned", label: phaseStatusLabel.planned, color: "var(--ink-mute)" },
+] as const;
+---
+
+<Layout
+  title={`Roadmap — ${site.name}`}
+  description="The phased plan for VOXL: from the live v1.0 foundation through crafting and survival depth, to mobs, advanced biomes and multiplayer."
+>
+  <!-- Intro -->
+  <section class="rm-intro" aria-labelledby="rm-title">
+    <div class="grid-bg" aria-hidden="true"></div>
+    <div class="wrap">
+      <div class="section-head rm-head">
+        <p class="eyebrow">Roadmap</p>
+        <h1 id="rm-title">The road to a full voxel sandbox</h1>
+        <p class="lede">
+          VOXL already ships a complete voxel engine — terrain, lighting, water,
+          survival and creative play. The roadmap below is how it grows from a
+          rock-solid foundation into something you'd recognise as a full sandbox:
+          crafting, mobs, advanced biomes, and eventually multiplayer.
+        </p>
+      </div>
+
+      <ul class="rm-legend" aria-label="Phase status legend">
+        {legend.map((l) => (
+          <li class="rm-leg">
+            <span class="rm-leg-dot" style={`background:${l.color}`}></span>
+            {l.label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  </section>
+
+  <!-- Timeline -->
+  <section class="rm-timeline" aria-label="Development phases">
+    <div class="wrap">
+      <ol class="rm-phases">
+        {roadmap.map((p) => (
+          <li class="rm-phase" data-status={p.status}>
+            <div class="rm-rail" aria-hidden="true">
+              <span class="rm-node"></span>
+            </div>
+            <div class="rm-phase-body">
+              <div class="rm-phase-head">
+                <span class="rm-phase-label">{p.phase}</span>
+                <span class={`rm-badge rm-badge--${p.status}`}>
+                  <span class="rm-badge-dot" aria-hidden="true"></span>
+                  {phaseStatusLabel[p.status]}
+                </span>
+              </div>
+              <h2 class="rm-phase-title">{p.title}</h2>
+              <p class="rm-phase-blurb">{p.blurb}</p>
+
+              <ul class="rm-items">
+                {p.items.map((it) => (
+                  <li class="rm-item card">
+                    <h3>{it.title}</h3>
+                    <p>{it.body}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+
+  <!-- Closing CTA -->
+  <section class="rm-cta" aria-labelledby="rm-cta-title">
+    <div class="wrap rm-cta-inner">
+      <div>
+        <p class="eyebrow">Play what's live</p>
+        <h2 id="rm-cta-title">Phase 1 is shipping today</h2>
+        <p class="lede">
+          The foundation is already in your browser — 11 biomes, flowing water,
+          voxel lighting and a full day/night cycle. Jump in, and watch this
+          space as the world grows.
+        </p>
+      </div>
+      <div class="btn-row rm-cta-btns">
+        <a class="btn btn--primary btn--lg" href="/play">▶ Play in browser</a>
+        <a class="btn" href="/#features">Explore features</a>
+      </div>
+    </div>
+  </section>
+</Layout>
+
+<style>
+  /* ---------- intro ---------- */
+  .rm-intro {
+    position: relative;
+    background:
+      radial-gradient(110% 70% at 50% -10%, rgba(55, 196, 106, 0.1), transparent 60%),
+      linear-gradient(180deg, #0c1430 0%, var(--bg-1) 100%);
+    padding-block: clamp(80px, 12vw, 130px) clamp(40px, 6vw, 64px);
+  }
+  .rm-head {
+    margin-bottom: 1.6rem;
+  }
+  .rm-head h1 {
+    background: linear-gradient(180deg, #ffffff, #9ff3c3 62%, var(--grass));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .rm-legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.4rem;
+  }
+  .rm-leg {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    color: var(--ink-dim);
+  }
+  .rm-leg-dot {
+    width: 13px;
+    height: 13px;
+    border-radius: 3px;
+    box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.25);
+  }
+
+  /* ---------- timeline ---------- */
+  .rm-timeline {
+    background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
+    padding-top: clamp(40px, 6vw, 72px);
+  }
+  .rm-phases {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: clamp(28px, 4vw, 48px);
+  }
+
+  /* the rail: a vertical line with a node dot, sits in the left gutter */
+  .rm-phase {
+    position: relative;
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: clamp(16px, 2.5vw, 28px);
+  }
+  .rm-rail {
+    position: relative;
+    display: flex;
+    justify-content: center;
+  }
+  /* connecting line */
+  .rm-rail::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    bottom: -48px; /* meet the next phase; last phase hides overflow */
+    left: 50%;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--border);
+  }
+  .rm-phase:last-child .rm-rail::before {
+    display: none;
+  }
+  /* node dot, coloured by phase status */
+  .rm-node {
+    position: relative;
+    z-index: 1;
+    width: 18px;
+    height: 18px;
+    margin-top: 6px;
+    border-radius: 5px;
+    background: var(--ink-mute);
+    box-shadow: 0 0 0 4px var(--bg-1), inset 0 -5px 0 rgba(0, 0, 0, 0.28);
+  }
+  .rm-phase[data-status="shipped"] .rm-node {
+    background: var(--grass);
+  }
+  .rm-phase[data-status="active"] .rm-node {
+    background: var(--amber);
+  }
+
+  .rm-phase-body {
+    min-width: 0;
+  }
+  .rm-phase-head {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+  }
+  .rm-phase-label {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+  .rm-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    letter-spacing: 0.06em;
+    padding: 0.25rem 0.6rem;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--ink-dim);
+  }
+  .rm-badge-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 2px;
+  }
+  .rm-badge--shipped {
+    border-color: rgba(55, 196, 106, 0.4);
+    color: var(--grass-light);
+  }
+  .rm-badge--shipped .rm-badge-dot {
+    background: var(--grass);
+  }
+  .rm-badge--active {
+    border-color: rgba(245, 165, 36, 0.4);
+    color: var(--amber);
+  }
+  .rm-badge--active .rm-badge-dot {
+    background: var(--amber);
+  }
+  .rm-badge--planned .rm-badge-dot {
+    background: var(--ink-mute);
+  }
+
+  .rm-phase-title {
+    margin: 0.5rem 0 0.4rem;
+  }
+  .rm-phase-blurb {
+    color: var(--ink-dim);
+    max-width: 68ch;
+    margin-bottom: 1.3rem;
+  }
+
+  .rm-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+    gap: clamp(12px, 1.8vw, 18px);
+  }
+  .rm-item {
+    padding: 1.15rem 1.2rem;
+  }
+  .rm-item h3 {
+    margin: 0 0 0.4rem;
+    color: var(--ink);
+    font-size: 1rem;
+  }
+  .rm-item p {
+    margin: 0;
+    color: var(--ink-dim);
+    font-size: 0.92rem;
+  }
+
+  /* ---------- closing CTA ---------- */
+  .rm-cta {
+    background:
+      radial-gradient(90% 120% at 20% 0%, rgba(55, 196, 106, 0.1), transparent 60%),
+      linear-gradient(180deg, var(--bg-0), var(--bg-1));
+  }
+  .rm-cta-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: clamp(20px, 3vw, 40px);
+    flex-wrap: wrap;
+  }
+  .rm-cta-inner > div:first-child {
+    max-width: 60ch;
+  }
+  .rm-cta-btns {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 200px;
+  }
+
+  @media (max-width: 640px) {
+    .rm-phase {
+      grid-template-columns: 26px 1fr;
+      gap: 14px;
+    }
+    .rm-rail::before {
+      bottom: -32px;
+    }
+    .rm-cta-inner {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .rm-cta-btns {
+      flex-direction: row;
+      width: 100%;
+    }
+  }
+</style>

@@ -19,24 +19,25 @@ import { site } from "../data/site";
 
   <div class="wrap hero-inner">
     <VoxelLogo size={30} />
-    <p class="eyebrow">Browser · WebGL · Prototype</p>
+    <p class="eyebrow">Browser · WebGL · Voxel Sandbox</p>
     <h1 id="hero-title" class="wordmark">VOXL</h1>
     <p class="hero-sub">{site.tagline}</p>
     <p class="hero-pitch">
-      Drop into a procedurally generated world of plains, forests, deserts and
-      mountains. Sculpt terrain block by block, fly over the canopy, and watch
-      chunks stream in around you — all in your browser, no install required.
+      Drop into a procedurally generated world spanning 11 biomes — from
+      rainforest to snowy peaks. Mine and build block by block, survive a full
+      hunger and health loop, swim through flowing water, and watch a dynamic
+      day/night cycle roll overhead. All in your browser, no install required.
     </p>
 
     <div class="btn-row hero-btns">
       <a class="btn btn--primary" href="/play">▶ Play in your browser</a>
-      <a class="btn" href="#showcase">See the world</a>
+      <a class="btn" href="/roadmap">See the roadmap</a>
     </div>
 
     <ul class="hero-chips" aria-label="Project facts">
-      <li class="chip"><b>v{site.version}</b> creative slice</li>
+      <li class="chip"><b>{site.biomes}</b> biomes · <b>{site.blocks}</b> blocks · <b>{site.treeSpecies}</b> tree types</li>
       <li class="chip"><span class="dot" style="background:var(--grass)"></span> Runs in any modern browser</li>
-      <li class="chip"><span class="dot" style="background:var(--teal)"></span> Deterministic seed worlds</li>
+      <li class="chip"><span class="dot" style="background:var(--teal)"></span> {site.dayLength} day/night cycle</li>
       <li class="chip"><span class="dot" style="background:var(--amber)"></span> {site.bundleGzip} gzipped</li>
     </ul>
   </div>

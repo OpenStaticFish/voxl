@@ -9,17 +9,17 @@ const todo = status.filter((s) => !s.done);
   <div class="wrap">
     <div class="section-head">
       <p class="eyebrow">Project status</p>
-      <h2 id="status-title">An honest prototype, v{site.version}</h2>
+      <h2 id="status-title">What works today, v{site.version}</h2>
       <p class="lede">
-        VOXL is a creative-mode slice — not a finished commercial game. Here's
-        exactly what works today and what's deliberately out of scope for this
-        version.
+        VOXL is an original indie engine, not a finished commercial game. Here's
+        exactly what's live right now and what's next on the build — the full
+        phased plan lives on the roadmap.
       </p>
     </div>
 
     <div class="status-cols">
       <div class="status-col card">
-        <h3><span class="status-dot status-dot--done" aria-hidden="true"></span> In this build</h3>
+        <h3><span class="status-dot status-dot--done" aria-hidden="true"></span> Live now</h3>
         <ul class="status-list">
           {done.map((s) => (
             <li class="ok">{s.label}</li>
@@ -27,15 +27,16 @@ const todo = status.filter((s) => !s.done);
         </ul>
       </div>
       <div class="status-col card">
-        <h3><span class="status-dot status-dot--todo" aria-hidden="true"></span> Not yet</h3>
+        <h3><span class="status-dot status-dot--todo" aria-hidden="true"></span> Coming next</h3>
         <ul class="status-list">
           {todo.map((s) => (
             <li class="no">{s.label}</li>
           ))}
         </ul>
         <p class="status-foot">
-          These are real gaps, not hidden behind placeholders. They're the most
-          natural next steps for a future version.
+          These are the nearest milestones on a longer journey to a full sandbox.
+          See the whole plan — crafting, mobs, advanced biomes and multiplayer —
+          on the <a href="/roadmap">roadmap</a>.
         </p>
       </div>
     </div>
