@@ -7,13 +7,14 @@ import { site } from "../data/site";
   <div class="wrap pitch-grid">
     <div class="pitch-copy">
       <p class="eyebrow">What is VOXL?</p>
-      <h2 id="pitch-title">A pocket voxel sandbox that runs the moment you open it.</h2>
+      <h2 id="pitch-title">A complete voxel sandbox engine that runs the moment you open it.</h2>
       <p>
-        VOXL is a focused <strong>creative-mode slice</strong> of a voxel sandbox:
-        spawn into a seeded world, walk or fly across four biomes, dig into a
-        hillside, raise a tower, and capture the result. There's no crafting tree,
-        no health bar, and no grinding — just terrain, blocks, and the tools to
-        shape them.
+        VOXL is a <strong>full browser-based voxel sandbox</strong>: spawn into
+        a seeded world, walk or fly across 11 biomes, dig into a cave system
+        beneath the hills, raise a tower under a shifting sky, and switch
+        between survival and creative play whenever you like. Terrain, water,
+        lighting and the day/night cycle are all hand-rolled — no engine wrapper,
+        no external assets.
       </p>
       <p>
         It's built as an original indie prototype with its own generated textures
@@ -27,11 +28,11 @@ import { site } from "../data/site";
           <span class="stat-l">chunk columns</span>
         </li>
         <li>
-          <span class="stat-n">4</span>
+          <span class="stat-n">{site.biomes}</span>
           <span class="stat-l">biomes</span>
         </li>
         <li>
-          <span class="stat-n">23</span>
+          <span class="stat-n">{site.blocks}</span>
           <span class="stat-l">block types</span>
         </li>
       </ul>

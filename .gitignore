@@ -33,7 +33,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-# Benchmark prompts/artifacts (kept out of the public repo)
+# Benchmark prompts/artifacts (kept out of the public repo).
+# Leading slash scopes this to the repo root so website/public/screenshots/
+# (real site assets) can be tracked.
 mineclone.md
 website.md
-screenshots/
+/screenshots/

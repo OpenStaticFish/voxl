@@ -13,9 +13,8 @@ const missingCount = shots.filter((s) => !s.present).length;
       <h2 id="showcase-title">The world, in view</h2>
       <p class="lede">
         VOXL is built to compose well on screen — grassy hills, trees,
-        shorelines and a fog-softened horizon. Real captures are shown here once
-        they've been added; until then, the frames below are clearly marked
-        placeholders.
+        shorelines and a fog-softened horizon. Here are a couple of captures
+        straight from the running game.
       </p>
     </div>
 
@@ -63,35 +62,6 @@ const missingCount = shots.filter((s) => !s.present).length;
         </li>
       ))}
     </ul>
-
-    <details class="howto">
-      <summary>How to capture these screenshots from the game</summary>
-      <div class="howto-body">
-        <p>
-          The game ships with two capture paths (documented in the repo
-          <code>README.md</code>):
-        </p>
-        <ol>
-          <li>
-            <strong>Manual (no extra deps):</strong> run the game
-            (<code>bun run dev</code> at the repo root), open it, and press
-            <kbd>P</kbd> in-game. The canvas PNG downloads — save it with the
-            exact filename shown under each frame above into
-            <code>website/public/screenshots/</code>.
-          </li>
-          <li>
-            <strong>Automated:</strong> from the repo root, run
-            <code>bun run screenshot</code> (uses Playwright) to capture both
-            files at once, then copy them into
-            <code>website/public/screenshots/</code>.
-          </li>
-        </ol>
-        <p>
-          After adding the files, rebuild the site (<code>bun run build</code>) —
-          the real images replace the placeholders automatically.
-        </p>
-      </div>
-    </details>
   </div>
 </section>
 
@@ -251,36 +221,5 @@ const missingCount = shots.filter((s) => !s.present).length;
     margin-top: 0.6rem;
     font-size: 0.78rem;
     color: var(--ink-mute);
-  }
-
-  .howto {
-    margin-top: 1.8rem;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--panel-solid);
-    padding: 0.2rem 1.1rem;
-  }
-  .howto summary {
-    cursor: pointer;
-    padding: 0.9rem 0;
-    font-family: var(--mono);
-    font-size: 0.92rem;
-    color: var(--ink-dim);
-    list-style: none;
-  }
-  .howto summary::-webkit-details-marker {
-    display: none;
-  }
-  .howto summary::before {
-    content: "▸ ";
-    color: var(--teal);
-  }
-  .howto[open] summary::before {
-    content: "▾ ";
-  }
-  .howto-body {
-    padding-bottom: 1.1rem;
-    color: var(--ink-dim);
-    font-size: 0.95rem;
   }
 </style>
