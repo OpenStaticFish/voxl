@@ -25,7 +25,7 @@ import { features, blockPalette } from "../data/site";
 
     <div class="palette" aria-labelledby="palette-title">
       <h3 id="palette-title" class="palette-title">The creative inventory</h3>
-      <p class="palette-sub">{blockPalette.length} placeable blocks, plants and foods — open the full grid with <kbd>E</kbd> in creative mode and place anything instantly.</p>
+      <p class="palette-sub">{blockPalette.length} blocks, plants and foods — open the full grid with <kbd>E</kbd> in creative mode.</p>
       <ul class="palette-list">
         {blockPalette.map((b) => (
           <li class="palette-block" title={b.name}>

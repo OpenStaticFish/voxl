@@ -9,7 +9,7 @@ export const site = {
   description:
     "VOXL is a browser-based WebGL voxel sandbox: drop into procedurally generated terrain across 11 biomes — forests, deserts, taiga, rainforests and snow-capped mountains — mine and build block by block, survive a full hunger and health loop, swim through flowing water, and watch a dynamic day/night cycle roll overhead. No download, no account — open it and play.",
   stack: "Babylon.js · Vite · TypeScript · Bun",
-  bundleGzip: "~135 kB",
+  bundleGzip: "~1.1 MB",
   chunk: "16×16×96",
   biomes: 11,
   blocks: "37+",
@@ -291,7 +291,7 @@ export const roadmap: readonly RoadmapPhase[] = [
       },
       {
         title: "Advanced biomes",
-        body: "Mangrove swamps, cherry groves, mushroom fields and more — each with unique flora, surface rules and generation, expanding the climate map beyond the launch twelve.",
+        body: "Mangrove swamps, cherry groves, mushroom fields and more — each with unique flora, surface rules and generation, expanding the climate map beyond the launch eleven.",
       },
       {
         title: "Cave biomes & deepslate",
