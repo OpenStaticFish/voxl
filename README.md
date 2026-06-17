@@ -331,3 +331,5 @@ node scripts/screenshot.ts → reached Chromium launch; failed ONLY because the
   array indexing is pervasive and construction-bounds-safe; this trades a bit of
   type rigor for readable code. With more time I'd add focused bounds helpers and
   re-enable it.
+
+<!-- preview-deploy verification (throwaway) -->
