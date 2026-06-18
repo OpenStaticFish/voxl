@@ -417,7 +417,6 @@ export class InventoryUI {
   }
 
   open(): void {
-    this.held = null;
     this.searchTerm = "";
     this.searchInput.value = "";
     this.refresh();
@@ -428,7 +427,7 @@ export class InventoryUI {
     // Return anything on the cursor to the inventory.
     if (this.held) {
       const leftover = this.inventory.add(this.held.id, this.held.count);
-      this.held = null;
+      this.held = leftover > 0 ? { id: this.held.id, count: leftover } : null;
       if (leftover > 0) this.onRefresh?.();
     }
     // Return anything left in the crafting grid to the backpack so items are
@@ -442,6 +441,11 @@ export class InventoryUI {
       else this.inventory.setCraft(i, null);
     }
     this.root.setAttribute("hidden", "");
+  }
+
+  clearHeld(): void {
+    this.held = null;
+    this.renderHeld();
   }
 
   get isOpen(): boolean {

@@ -107,6 +107,7 @@ export class Game {
   private readonly invUI: InventoryUI;
   private readonly drops: DroppedItem[] = [];
   private readonly dropMaterials = new Map<ItemId, StandardMaterial>();
+  private lastDropFullToastAt = -Infinity;
   private readonly graphics: GraphicsController;
   private readonly perf: PerfOverlay;
   private readonly chunkBorders: ChunkBorderOverlay;
@@ -530,8 +531,14 @@ export class Game {
 
   private setMode(mode: GameMode): void {
     const prev = this.settings.mode;
-    this.applySettings({ mode });
     if (prev !== mode) {
+      // Resolve any cursor/craft-grid contents under the previous mode before
+      // swapping inventories, otherwise creative-held items can leak into the
+      // restored survival backpack on close.
+      this.closeInventorySilent();
+      this.invUI.clearHeld();
+      if (prev === "survival") this.saveState();
+      this.applySettings({ mode });
       // Mode inventories are intentionally isolated. Creative palette pulls
       // must never leak into survival, and entering creative should always show
       // the clean starter hotbar.
@@ -552,6 +559,8 @@ export class Game {
       }
       this.invUI.refresh();
       this.refreshHud();
+    } else {
+      this.applySettings({ mode });
     }
     this.hud.showToast(mode === "creative" ? "Creative mode" : "Survival mode");
     this.saveState();
@@ -893,14 +902,21 @@ export class Game {
       const dy = d.mesh.position.y - (p.y + PLAYER_HEIGHT * 0.45);
       const dz = d.mesh.position.z - p.z;
       if (dx * dx + dy * dy + dz * dz > DROP_PICKUP_RADIUS * DROP_PICKUP_RADIUS) continue;
+      const before = d.count;
       const leftover = this.inventory.add(d.id, d.count);
       if (leftover <= 0) {
         d.mesh.dispose();
         this.drops.splice(i, 1);
         this.refreshHud();
-      } else {
+      } else if (leftover < before) {
         d.count = leftover;
-        this.hud.showToast("Inventory full");
+        this.refreshHud();
+      } else {
+        const now = performance.now();
+        if (now - this.lastDropFullToastAt > 1200) {
+          this.lastDropFullToastAt = now;
+          this.hud.showToast("Inventory full");
+        }
       }
     }
   }
