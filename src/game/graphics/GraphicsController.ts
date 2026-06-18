@@ -133,9 +133,9 @@ export class GraphicsController {
       }
       this.pipeline.fxaaEnabled = true;
     } else if (this.pipeline) {
-      // AA off → tear down the pipeline so the scene renders straight to the
-      // default framebuffer (no fullscreen pass). Engine-level MSAA (set at
-      // context creation) remains as the baseline edge AA.
+      // AA off: tear down the pipeline so the scene renders straight to the
+      // default framebuffer. Engine-level antialiasing is also disabled at
+      // context creation, so low/custom presets render with no AA.
       this.pipeline.dispose();
       this.pipeline = null;
     }
