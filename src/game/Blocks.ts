@@ -61,6 +61,8 @@ const T = {
   BIRCH_LEAVES: 40,
   SPRUCE_LEAVES: 41,
   SNOWY_LEAVES: 42,
+  CRAFTING_TABLE_TOP: 43,
+  CRAFTING_TABLE_SIDE: 44,
 } as const;
 
 /**
@@ -589,6 +591,23 @@ export const BLOCKS: readonly BlockDef[] = [
     liquid: false,
     light: { lightPassesThrough: true },
   },
+  {
+    id: 38,
+    name: "Crafting Table",
+    tiles: [
+      T.CRAFTING_TABLE_SIDE,
+      T.CRAFTING_TABLE_SIDE,
+      T.CRAFTING_TABLE_TOP,
+      T.WOOD_TOP,
+      T.CRAFTING_TABLE_SIDE,
+      T.CRAFTING_TABLE_SIDE,
+    ],
+    color: "#8a5a32",
+    solid: true,
+    opaque: true,
+    transparent: false,
+    liquid: false,
+  },
 ];
 
 export const AIR_BLOCK = 0;
@@ -596,6 +615,7 @@ export const WATER_BLOCK = 7;
 export const WATER_FLOWING_BLOCK = 29;
 export const CACTUS_BLOCK = 19;
 export const MUSHROOM_BLOCK = 23;
+export const CRAFTING_TABLE_BLOCK = 38;
 
 export function isAir(id: BlockId): boolean {
   return id === AIR_BLOCK;
