@@ -43,7 +43,7 @@ export class WaterMaterial {
   private alpha = 0.82;
   /** Base diffuse/emissive colours (the subtle animation oscillates around these). */
   private readonly baseDiffuse = Color3.FromHexString("#1f86d8");
-  private readonly baseEmissive = Color3.FromHexString("#0b3a6b");
+  private readonly baseEmissive = Color3.Black();
   private readonly shimmerColor = Color3.FromHexString("#2aa0e8");
   private animTime = 0;
   private animationEnabled = true;
@@ -160,9 +160,7 @@ export class WaterMaterial {
     m.diffuseColor.r = this.baseDiffuse.r + (this.shimmerColor.r - this.baseDiffuse.r) * amp * w;
     m.diffuseColor.g = this.baseDiffuse.g + (this.shimmerColor.g - this.baseDiffuse.g) * amp * w;
     m.diffuseColor.b = this.baseDiffuse.b + (this.shimmerColor.b - this.baseDiffuse.b) * amp * w;
-    m.emissiveColor.r = this.baseEmissive.r * (1 + amp * 0.5 * w);
-    m.emissiveColor.g = this.baseEmissive.g * (1 + amp * 0.5 * w);
-    m.emissiveColor.b = this.baseEmissive.b * (1 + amp * 0.5 * w);
+    m.emissiveColor.copyFrom(this.baseEmissive);
   }
 
   /** Debug: enable/disable the surface scroll + shimmer (texture stays put). */

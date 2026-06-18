@@ -66,8 +66,22 @@ console.log("\n[Test 1] Source above air pours straight down (waterfall), stops 
   assert(w.getBlock(0, 4, 0) === WATER_FLOWING_BLOCK, "flowing at y=4");
   assert(w.getBlock(0, 3, 0) === WATER_FLOWING_BLOCK, "flowing at y=3");
   assert(w.getLevel(0, 4, 0) === 7 && w.getLevel(0, 1, 0) === 7, "falling column is full level (7)");
+  assert(w.getBlock(1, 5, 0) === WATER_FLOWING_BLOCK && w.getBlock(-1, 5, 0) === WATER_FLOWING_BLOCK, "source feeds same-level neighbours like Luanti");
   assert(w.getBlock(0, 0, 0) === 3, "floor intact");
   assert(sim.queueSize === 0, "queue drained (no endless loop)");
+}
+
+console.log("\n[Test 1b] Falling flowing water does not feed sideways until it lands.");
+{
+  const w = new FakeWorld();
+  w.floor(-14, 14, -14, 14, 0);
+  w.set(0, 5, 0, WATER_FLOWING_BLOCK, 7);
+  w.set(0, 4, 0, WATER_FLOWING_BLOCK, 7);
+  const sim = new LiquidSimulator();
+  sim.enqueue(1, 4, 0);
+  settle(sim, w);
+  assert(w.getBlock(1, 4, 0) === AIR_BLOCK, "same-level falling flowing node does not feed sideways");
+  assert(sim.queueSize === 0, "queue drained");
 }
 
 console.log("\n[Test 2] Source on a solid floor spreads horizontally and stops at range.");

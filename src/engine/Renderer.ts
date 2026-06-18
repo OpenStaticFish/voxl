@@ -16,11 +16,11 @@ export class Renderer {
 
     this.engine = new Engine(
       this.canvas,
-      true, // antialias
+      false, // antialias; FXAA is controlled by graphics settings when requested
       {
         preserveDrawingBuffer: true, // needed for canvas.toDataURL screenshots
         powerPreference: "high-performance",
-        stencil: true,
+        stencil: false,
       },
       false, // adaptToDeviceRatio — we cap manually below
     );

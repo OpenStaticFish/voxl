@@ -25,9 +25,11 @@ export class LiquidUpdateQueue {
   /** Normal lane (flow propagation + seeding). */
   private readonly pending = new Set<string>();
   private fifo: QueuedCell[] = [];
+  private fifoHead = 0;
   /** Priority lane (player edits) — drained before the normal lane. */
   private readonly priorityPending = new Set<string>();
   private priorityFifo: QueuedCell[] = [];
+  private priorityFifoHead = 0;
   /** High-water mark (both lanes) since creation, for the debug overlay. */
   peakSize = 0;
 
@@ -84,17 +86,25 @@ export class LiquidUpdateQueue {
    */
   dequeue(): QueuedCell | null {
     // Priority first.
-    while (this.priorityFifo.length > 0) {
-      const cell = this.priorityFifo.shift()!;
+    while (this.priorityFifoHead < this.priorityFifo.length) {
+      const cell = this.priorityFifo[this.priorityFifoHead++]!;
       const k = this.key(cell.x, cell.y, cell.z);
-      if (this.priorityPending.delete(k)) return cell;
+      if (this.priorityPending.delete(k)) {
+        this.compactPriority();
+        return cell;
+      }
     }
+    this.compactPriority(true);
     // Then the normal backlog.
-    while (this.fifo.length > 0) {
-      const cell = this.fifo.shift()!;
+    while (this.fifoHead < this.fifo.length) {
+      const cell = this.fifo[this.fifoHead++]!;
       const k = this.key(cell.x, cell.y, cell.z);
-      if (this.pending.delete(k)) return cell;
+      if (this.pending.delete(k)) {
+        this.compactNormal();
+        return cell;
+      }
     }
+    this.compactNormal(true);
     return null;
   }
 
@@ -104,11 +114,15 @@ export class LiquidUpdateQueue {
    * scheduled tick). Returns null when the priority lane is empty.
    */
   pullPriority(): QueuedCell | null {
-    while (this.priorityFifo.length > 0) {
-      const cell = this.priorityFifo.shift()!;
+    while (this.priorityFifoHead < this.priorityFifo.length) {
+      const cell = this.priorityFifo[this.priorityFifoHead++]!;
       const k = this.key(cell.x, cell.y, cell.z);
-      if (this.priorityPending.delete(k)) return cell;
+      if (this.priorityPending.delete(k)) {
+        this.compactPriority();
+        return cell;
+      }
     }
+    this.compactPriority(true);
     return null;
   }
 
@@ -116,12 +130,28 @@ export class LiquidUpdateQueue {
   clear(): void {
     this.pending.clear();
     this.fifo.length = 0;
+    this.fifoHead = 0;
     this.priorityPending.clear();
     this.priorityFifo.length = 0;
+    this.priorityFifoHead = 0;
   }
 
   /** Debug snapshot of queued positions (read-only; does not mutate). */
   snapshot(): readonly QueuedCell[] {
-    return this.fifo;
+    return this.fifo.slice(this.fifoHead);
+  }
+
+  private compactNormal(force = false): void {
+    if (this.fifoHead === 0) return;
+    if (!force && this.fifoHead < 1024 && this.fifoHead * 2 < this.fifo.length) return;
+    this.fifo = this.fifo.slice(this.fifoHead);
+    this.fifoHead = 0;
+  }
+
+  private compactPriority(force = false): void {
+    if (this.priorityFifoHead === 0) return;
+    if (!force && this.priorityFifoHead < 1024 && this.priorityFifoHead * 2 < this.priorityFifo.length) return;
+    this.priorityFifo = this.priorityFifo.slice(this.priorityFifoHead);
+    this.priorityFifoHead = 0;
   }
 }

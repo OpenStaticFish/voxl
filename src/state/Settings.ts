@@ -36,7 +36,8 @@ export function loadSettings(): Settings {
     if (legacyClouds !== undefined && savedGraphics?.clouds === undefined) {
       graphics.clouds = legacyClouds ? "fancy" : "off";
     }
-    return { ...DEFAULT_SETTINGS, ...rest, mode, graphics };
+    const viewDistance = migratePresetViewDistance(rest.viewDistance, graphics.preset);
+    return { ...DEFAULT_SETTINGS, ...rest, viewDistance, mode, graphics };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -48,6 +49,13 @@ export function saveSettings(settings: Settings): void {
   } catch {
     // ignore storage failures (private mode, etc.)
   }
+}
+
+function migratePresetViewDistance(viewDistance: number | undefined, preset: GraphicsSettings["preset"]): number {
+  if (viewDistance === undefined) return DEFAULT_SETTINGS.viewDistance;
+  if (preset === "medium" && (viewDistance === 6 || viewDistance === 8)) return 10;
+  if (preset === "high" && (viewDistance === 8 || viewDistance === 12)) return 16;
+  return viewDistance;
 }
 
 export type { GraphicsSettings };

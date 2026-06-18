@@ -60,7 +60,7 @@ export const GRAPHICS_PRESETS: Record<Exclude<GraphicsPreset, "custom">, Graphic
     renderScale: 1.0,
     dprCap: 2,
     antiAliasing: false,
-    shadows: "low",
+    shadows: "off",
     water: "medium",
     foliage: "medium",
     clouds: "fancy",
@@ -71,7 +71,7 @@ export const GRAPHICS_PRESETS: Record<Exclude<GraphicsPreset, "custom">, Graphic
     renderScale: 1.0,
     dprCap: 2,
     antiAliasing: true,
-    shadows: "medium",
+    shadows: "off",
     water: "high",
     foliage: "high",
     clouds: "fancy",
@@ -88,7 +88,7 @@ export function defaultGraphicsSettings(): GraphicsSettings {
 
 /** A sensible default render distance (chunks) matching the device class. */
 export function defaultRenderDistance(): number {
-  return detectLowEndDevice() ? 4 : 6;
+  return detectLowEndDevice() ? 4 : 10;
 }
 
 /**
@@ -129,12 +129,16 @@ export function migrateGraphics(parsed: Partial<GraphicsSettings> | undefined): 
   if (clouds === undefined && typeof legacy.clouds === "boolean") {
     clouds = legacy.clouds ? "fancy" : "off";
   }
+  const preset = parsed.preset ?? base.preset;
+  const oldPresetShadow =
+    (preset === "medium" && parsed.shadows === "low") ||
+    (preset === "high" && parsed.shadows === "medium");
   return {
-    preset: parsed.preset ?? base.preset,
+    preset,
     renderScale: clamp(parsed.renderScale ?? base.renderScale, 0.5, 1),
     dprCap: clamp(parsed.dprCap ?? base.dprCap, 1.5, 2),
     antiAliasing: parsed.antiAliasing ?? base.antiAliasing,
-    shadows: parsed.shadows ?? base.shadows,
+    shadows: oldPresetShadow ? "off" : parsed.shadows ?? base.shadows,
     water: parsed.water ?? base.water,
     foliage: parsed.foliage ?? base.foliage,
     clouds: clouds ?? base.clouds,
