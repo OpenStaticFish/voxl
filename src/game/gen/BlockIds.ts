@@ -40,5 +40,7 @@ export const BIRCH_WOOD = 34;
 export const BIRCH_LEAVES = 35;
 export const SPRUCE_LEAVES = 36;
 export const SNOWY_LEAVES = 37;
+// (38 Crafting Table — player-crafted via the Recipes registry, not placed by
+// terrain gen. ID must stay stable: chunk data stores raw block ids.)
 
 export type BlockId = number;

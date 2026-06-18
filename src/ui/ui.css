@@ -775,9 +775,31 @@ input[type="checkbox"] {
   background: rgba(45, 212, 191, 0.14);
   transform: translateY(-1px);
 }
-.slot.slot-disabled {
-  opacity: 0.35;
-  cursor: default;
+/* Craft input slots behave like inventory slots (drag/swap). */
+.craft-slot {
+  cursor: pointer;
+}
+.craft-slot:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+}
+/* Live recipe output: highlighted only when a recipe resolves. */
+.craft-out {
+  cursor: pointer;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.craft-out:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+}
+.craft-out.filled {
+  border-color: var(--accent-2);
+  background: rgba(45, 212, 191, 0.14);
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.28);
+}
+.craft-out.filled:hover {
+  background: rgba(45, 212, 191, 0.24);
+  transform: translateY(-1px);
 }
 .slot.slot-trash {
   font-size: 18px;

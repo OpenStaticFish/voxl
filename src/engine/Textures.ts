@@ -521,6 +521,38 @@ export function createTextureAtlas(scene: Scene): AtlasResult {
       }
     }
   }
+  // 43: crafting table top — dark wood with a 3x3 grid of lighter cells
+  {
+    const [ox, oy] = off(43);
+    paintSpeckled(ctx, ox, oy, [104, 70, 40], 14, 70, rand);
+    // grid lines dividing the tile into a 3x3 of ~5px cells
+    ctx.fillStyle = "rgb(54,36,20)";
+    for (const p of [5, 10]) {
+      ctx.fillRect(ox, oy + p, TILE_PX, 1);
+      ctx.fillRect(ox + p, oy, 1, TILE_PX);
+    }
+    // faint lighter inset on each cell to read as a work surface
+    ctx.fillStyle = "rgba(196,150,92,0.35)";
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        ctx.fillRect(ox + c * 5 + 1, oy + r * 5 + 1, 3, 3);
+      }
+    }
+  }
+  // 44: crafting table side — plank bands with a darker tool strip
+  {
+    const [ox, oy] = off(44);
+    paintSpeckled(ctx, ox, oy, [150, 104, 60], 12, 70, rand);
+    // horizontal plank seams
+    ctx.fillStyle = "rgb(96,64,34)";
+    for (const y of [4, 8, 12]) ctx.fillRect(ox, oy + y, TILE_PX, 1);
+    // a dark recessed strip (the "tool drawer" band) across the middle
+    ctx.fillStyle = "rgb(70,46,24)";
+    ctx.fillRect(ox, oy + 6, TILE_PX, 2);
+    ctx.fillStyle = "rgba(0,0,0,0.25)";
+    ctx.fillRect(ox + 2, oy + 6, 3, 1);
+    ctx.fillRect(ox + 9, oy + 6, 4, 1);
+  }
 
   // Upload the painted canvas to the GPU.
   texture.update(false);

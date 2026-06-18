@@ -33,6 +33,7 @@ import {
   isBreakable,
   isFood,
   type GameMode,
+  type ItemId,
 } from "./Items";
 import { Inventory } from "./Inventory";
 import { PlayerState } from "./PlayerState";
@@ -57,6 +58,21 @@ const SKY_COLOR_HEX = "#bfe3ff";
 const EAT_TIME = 1.6;
 const INVENTORY_SIZE = 36;
 const HOTBAR_SIZE = 9;
+const DROP_PICKUP_RADIUS = 0.85;
+const DROP_FLOAT_AMPLITUDE = 0.08;
+const DROP_GRAVITY = 14;
+const DROP_TERMINAL_VELOCITY = -8;
+const DROP_HALF_SIZE = 0.16;
+
+interface DroppedItem {
+  id: ItemId;
+  count: number;
+  mesh: Mesh;
+  baseY: number;
+  vy: number;
+  grounded: boolean;
+  age: number;
+}
 
 /**
  * Top-level orchestrator. Owns the renderer (Babylon Engine), the scene, the
@@ -86,6 +102,8 @@ export class Game {
   private readonly inventory = new Inventory(INVENTORY_SIZE, HOTBAR_SIZE);
   private readonly stats = new PlayerState();
   private readonly invUI: InventoryUI;
+  private readonly drops: DroppedItem[] = [];
+  private readonly dropMaterials = new Map<ItemId, StandardMaterial>();
   private readonly graphics: GraphicsController;
   private readonly perf: PerfOverlay;
   private readonly chunkBorders: ChunkBorderOverlay;
@@ -352,6 +370,7 @@ export class Game {
   }
 
   private createWorld(seed: string): void {
+    this.clearDrops();
     if (this.lighting) {
       this.lighting.dispose();
       this.lighting = null;
@@ -398,17 +417,33 @@ export class Game {
   /** Load inventory+vitals for this seed, or seed a fresh starter kit. */
   private loadOrCreateProgress(): void {
     const save = loadSave(this.settings.seed);
-    if (save) {
-      this.inventory.load(save.inventory);
-      this.stats.load(save.stats);
-      if (save.mode && save.mode !== this.settings.mode) {
-        this.applySettings({ mode: save.mode });
-      }
+    // Resume in the mode the player last left (if the save recorded one).
+    if (save?.mode && save.mode !== this.settings.mode) {
+      this.applySettings({ mode: save.mode });
+    }
+    const mode = this.settings.mode;
+    this.stats.reset();
+    if (mode === "creative") {
+      // Creative NEVER restores a saved backpack — creative palette pulls are
+      // ephemeral, so a creative world always opens with the clean starter
+      // hotbar (see saveState, which also skips persisting creative items).
+      this.seedInventoryForMode("creative");
       return;
     }
-    this.inventory.clear();
-    this.stats.reset();
-    if (this.settings.mode === "creative") {
+    // Survival: restore saved progress, else seed the starter survival kit.
+    if (save) {
+      this.inventory.clear(); // clears backpack + crafting grid
+      this.inventory.load(save.inventory);
+      this.inventory.loadCrafting(save.crafting);
+      this.stats.load(save.stats);
+    } else {
+      this.seedInventoryForMode("survival");
+    }
+  }
+
+  private seedInventoryForMode(mode: GameMode): void {
+    this.inventory.clear(); // clears backpack + crafting grid
+    if (mode === "creative") {
       for (let i = 0; i < STARTER_CREATIVE_HOTBAR.length && i < HOTBAR_SIZE; i++) {
         this.inventory.setSlot(i, { id: STARTER_CREATIVE_HOTBAR[i], count: 64 });
       }
@@ -440,8 +475,12 @@ export class Game {
   }
 
   private quitToMenu(): void {
-    this.saveState();
+    // Close the inventory (returns held + craft-grid items to the backpack)
+    // BEFORE saving, otherwise those items would be persisted both in the craft
+    // grid and — next session — re-added to the backpack on close.
     this.closeInventorySilent();
+    this.saveState();
+    this.clearDrops();
     this.input.exitLock();
     this.input.clearTransient();
     this.setState("menu");
@@ -487,7 +526,17 @@ export class Game {
   }
 
   private setMode(mode: GameMode): void {
+    const prev = this.settings.mode;
     this.applySettings({ mode });
+    if (prev !== mode) {
+      // Mode inventories are intentionally isolated. Creative palette pulls
+      // must never leak into survival, and entering creative should always show
+      // the clean starter hotbar.
+      this.seedInventoryForMode(mode);
+      this.stats.reset();
+      this.invUI.refresh();
+      this.refreshHud();
+    }
     this.hud.showToast(mode === "creative" ? "Creative mode" : "Survival mode");
     this.saveState();
   }
@@ -561,6 +610,7 @@ export class Game {
     const mode = this.settings.mode;
     this.player.update(dt, world, this.input, this.settings);
     world.update(this.player.position.x, this.player.position.z, this.settings.viewDistance, dt * 1000);
+    this.updateDrops(dt);
 
     if (this.breakCooldown > 0) this.breakCooldown -= dt;
 
@@ -757,17 +807,83 @@ export class Game {
     if (!isBreakable(id)) return;
     const changed = world.setBlock(x, y, z, 0);
     dbg("  setBlock -> changed=" + changed);
+    if (!changed) return;
     // setBlock already wakes the liquid simulator around the edit, so water
     // flows into the newly opened space / recedes correctly.
     if (this.settings.mode === "survival") {
       const drop = dropForBlock(id);
-      if (drop !== null) {
-        const leftover = this.inventory.add(drop, 1);
-        if (leftover > 0) this.hud.showToast("Inventory full");
-      }
+      if (drop !== null) this.spawnDrop(drop, x + 0.5, y + 0.55, z + 0.5);
       this.stats.addExhaustion(5);
       this.refreshHud();
     }
+  }
+
+  private dropMaterial(id: ItemId): StandardMaterial {
+    const existing = this.dropMaterials.get(id);
+    if (existing) return existing;
+    const mat = new StandardMaterial(`drop-${id}`, this.scene);
+    const color = getItem(id)?.color ?? "#888888";
+    mat.diffuseColor = Color3.FromHexString(color);
+    mat.emissiveColor = Color3.FromHexString(color).scale(0.18);
+    mat.specularColor = new Color3(0.08, 0.08, 0.08);
+    this.dropMaterials.set(id, mat);
+    return mat;
+  }
+
+  private spawnDrop(id: ItemId, x: number, y: number, z: number, count = 1): void {
+    const mesh = MeshBuilder.CreateBox(`drop-${id}`, { size: 0.32 }, this.scene);
+    mesh.material = this.dropMaterial(id);
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(0.25, 0.4, 0.15);
+    this.drops.push({ id, count, mesh, baseY: y, vy: 0, grounded: false, age: 0 });
+  }
+
+  private updateDrops(dt: number): void {
+    if (this.drops.length === 0) return;
+    const p = this.player.position;
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i];
+      d.age += dt;
+      if (!d.grounded) {
+        d.vy = Math.max(DROP_TERMINAL_VELOCITY, d.vy - DROP_GRAVITY * dt);
+        d.mesh.position.y += d.vy * dt;
+        const footY = d.mesh.position.y - DROP_HALF_SIZE;
+        const belowY = Math.floor(footY);
+        const bx = Math.floor(d.mesh.position.x);
+        const bz = Math.floor(d.mesh.position.z);
+        if (belowY >= 0 && getBlock(this.world!.getBlock(bx, belowY, bz)).solid && footY <= belowY + 1) {
+          d.baseY = belowY + 1 + DROP_HALF_SIZE;
+          d.mesh.position.y = d.baseY;
+          d.vy = 0;
+          d.grounded = true;
+        } else if (d.mesh.position.y < -8) {
+          d.mesh.dispose();
+          this.drops.splice(i, 1);
+          continue;
+        }
+      } else {
+        d.mesh.position.y = d.baseY + Math.sin(d.age * 4) * DROP_FLOAT_AMPLITUDE;
+      }
+      d.mesh.rotation.y += dt * 1.8;
+      const dx = d.mesh.position.x - p.x;
+      const dy = d.mesh.position.y - (p.y + PLAYER_HEIGHT * 0.45);
+      const dz = d.mesh.position.z - p.z;
+      if (dx * dx + dy * dy + dz * dz > DROP_PICKUP_RADIUS * DROP_PICKUP_RADIUS) continue;
+      const leftover = this.inventory.add(d.id, d.count);
+      if (leftover <= 0) {
+        d.mesh.dispose();
+        this.drops.splice(i, 1);
+        this.refreshHud();
+      } else {
+        d.count = leftover;
+        this.hud.showToast("Inventory full");
+      }
+    }
+  }
+
+  private clearDrops(): void {
+    for (const d of this.drops) d.mesh.dispose();
+    this.drops.length = 0;
   }
 
   private placeBlock(t: { px: number; py: number; pz: number }): void {
@@ -903,8 +1019,22 @@ export class Game {
 
   private saveState(): void {
     if (!this.world) return;
+    if (this.settings.mode === "survival") {
+      writeSave(this.settings.seed, {
+        inventory: this.inventory.serialize(),
+        crafting: this.inventory.serializeCrafting(),
+        stats: this.stats.serialize(),
+        mode: this.settings.mode,
+      });
+      return;
+    }
+    // Creative: never persist inventory/craft-grid changes (palette pulls are
+    // ephemeral). Preserve the last survival backpack so returning to survival
+    // still restores progress; only the resumed mode + vitals are updated.
+    const prev = loadSave(this.settings.seed);
     writeSave(this.settings.seed, {
-      inventory: this.inventory.serialize(),
+      inventory: prev?.inventory ?? [],
+      crafting: prev?.crafting ?? [],
       stats: this.stats.serialize(),
       mode: this.settings.mode,
     });
@@ -1085,6 +1215,9 @@ export class Game {
 
   dispose(): void {
     this.saveState();
+    this.clearDrops();
+    for (const mat of this.dropMaterials.values()) mat.dispose();
+    this.dropMaterials.clear();
     this.renderer.engine.stopRenderLoop();
     this.running = false;
     window.removeEventListener("resize", this.handleResize);
@@ -1125,7 +1258,7 @@ export class Game {
   /** Clear the saved survival progress for the current seed (debug helper). */
   _resetProgress(): void {
     clearSave(this.settings.seed);
-    this.inventory.clear();
+    this.inventory.clear(); // also clears the crafting grid
     this.stats.reset();
     this.refreshHud();
   }

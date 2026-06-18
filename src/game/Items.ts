@@ -24,7 +24,7 @@ export interface ItemDef {
   color: string;
   maxStack: number;
   /** UI rendering hint. */
-  icon: "block" | "food";
+  icon: "block" | "food" | "material";
   /** If set, using this item places the given block. */
   block?: BlockId;
   /** If set, this item can be eaten. */
@@ -42,6 +42,15 @@ const FOOD_ITEMS: ItemDef[] = [
   { id: "cooked_beef", name: "Cooked Beef", color: "#8a4a3a", maxStack: 64, icon: "food", food: { hunger: 8, saturation: 12.8 } },
   { id: "cookie", name: "Cookie", color: "#b07a3a", maxStack: 64, icon: "food", food: { hunger: 2, saturation: 0.4 } },
   { id: "golden_apple", name: "Golden Apple", color: "#f2c94c", maxStack: 64, icon: "food", food: { hunger: 8, saturation: 9.6 } },
+];
+
+/**
+ * Standalone crafting materials (not placeable, not edible). Planks and sticks
+ * are the intermediates produced by the starter recipes in Recipes.ts.
+ */
+const MATERIAL_ITEMS: ItemDef[] = [
+  { id: "planks", name: "Planks", color: "#b08654", maxStack: 64, icon: "material" },
+  { id: "stick", name: "Stick", color: "#9a6a3a", maxStack: 64, icon: "material" },
 ];
 
 /** Blocks whose placement form is edible. */
@@ -67,7 +76,7 @@ function buildBlockItems(): ItemDef[] {
   return items;
 }
 
-export const ITEMS: readonly ItemDef[] = [...buildBlockItems(), ...FOOD_ITEMS];
+export const ITEMS: readonly ItemDef[] = [...buildBlockItems(), ...FOOD_ITEMS, ...MATERIAL_ITEMS];
 
 const ITEM_INDEX = new Map<ItemId, ItemDef>(ITEMS.map((it) => [it.id, it]));
 
@@ -89,6 +98,7 @@ export const CREATIVE_PALETTE: readonly ItemId[] = [
   "b24", "b25", "b26",
   "b7",
   "apple", "bread", "cooked_beef", "cookie", "golden_apple",
+  "planks", "stick", "b38",
 ];
 
 /**

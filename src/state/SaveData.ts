@@ -7,10 +7,17 @@ import type { GameMode } from "../game/Items";
  * localStorage key so a fresh world or a re-seed starts clean.
  */
 
-const VERSION = "v1";
+// Bumped to v2: creative-mode inventory is no longer persisted (palette pulls
+// are ephemeral), so older v1 saves — which could contain a full creative
+// backpack — are intentionally ignored. Survival progress from v1 is reset too;
+// re-playing in survival rebuilds a clean save under the new semantics.
+const VERSION = "v2";
 
 export interface SaveData {
   inventory: SerializedSlot[];
+  /** Optional crafting-grid state (returned-to-backpack on close, but
+   *  persisted so a full backpack doesn't strand items mid-session). */
+  crafting?: SerializedSlot[];
   stats: SerializedStats;
   /** Optional — omitted/invalid values are ignored on load. */
   mode?: GameMode;

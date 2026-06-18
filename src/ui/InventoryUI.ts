@@ -6,6 +6,7 @@ import {
   type GameMode,
   type ItemId,
 } from "../game/Items";
+import { match, type MatchResult } from "../game/Recipes";
 
 function el(tag: string, cls?: string): HTMLElement {
   const e = document.createElement(tag);
@@ -37,6 +38,9 @@ export class InventoryUI {
   private paletteGrid!: HTMLElement;
   private searchInput!: HTMLInputElement;
   private readonly slotEls: HTMLElement[] = [];
+  /** Craft-input slot elements, indexed by craftingGrid index (0..8). */
+  private readonly craftEls: HTMLElement[] = [];
+  private craftOutEl!: HTMLElement;
 
   private searchTerm = "";
 
@@ -76,15 +80,22 @@ export class InventoryUI {
 
     const craft = el("div", "inv-craft");
     const craftLabel = el("div", "inv-section-label");
-    craftLabel.textContent = "Crafting — Tier 3";
+    craftLabel.textContent = "Crafting";
     const craftGrid = el("div", "inv-craft-grid");
-    for (let i = 0; i < 4; i++) {
-      const s = el("div", "slot slot-disabled");
-      craftGrid.append(s);
-    }
+    // The inventory exposes the top-left 2x2 of the logical 3x3 crafting grid
+    // (indices 0,1,3,4). match() handles the smaller footprint via bounding-box
+    // normalization, so only recipes that fit in 2x2 can resolve here.
+    for (const ci of [0, 1, 3, 4]) craftGrid.append(this.makeCraftSlot(ci));
     const craftArrow = el("div", "inv-arrow");
     craftArrow.textContent = "→";
-    const craftOut = el("div", "slot slot-disabled");
+    const craftOut = el("div", "slot craft-out");
+    craftOut.title = "Craft — click to take the result";
+    craftOut.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      if (e.button === 0) this.craft();
+    });
+    craftOut.addEventListener("contextmenu", (ev) => ev.preventDefault());
+    this.craftOutEl = craftOut;
     craft.append(craftLabel, craftGrid, craftArrow, craftOut, this.makeTrash());
 
     const backpack = el("div", "inv-grid");
@@ -164,15 +175,33 @@ export class InventoryUI {
     return s;
   }
 
-  private leftClickSlot(index: number): void {
-    const stack = this.inventory.getSlot(index);
+  private makeCraftSlot(ci: number): HTMLElement {
+    const s = el("div", "slot inv-slot craft-slot");
+    s.dataset.craft = String(ci);
+    s.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      if (e.button === 0) this.leftClickCraft(ci);
+      else if (e.button === 2) this.rightClickCraft(ci);
+    });
+    s.addEventListener("contextmenu", (ev) => ev.preventDefault());
+    this.craftEls[ci] = s;
+    return s;
+  }
+
+  /**
+   * Generic left-click pickup/place/merge/swap against a slot expressed as a
+   * getter/setter pair. Backed by either an inventory slot or a craft cell, so
+   * the craft grid reuses the exact same drag/merge semantics as the backpack.
+   */
+  private leftClickAt(get: () => ItemStack | null, set: (s: ItemStack | null) => void): void {
+    const stack = get();
     if (!this.held) {
       if (stack) {
         this.held = stack;
-        this.inventory.setSlot(index, null);
+        set(null);
       }
     } else if (!stack) {
-      this.inventory.setSlot(index, this.held);
+      set(this.held);
       this.held = null;
     } else if (stack.id === this.held.id) {
       const max = getItem(stack.id)?.maxStack ?? 64;
@@ -182,24 +211,23 @@ export class InventoryUI {
       this.held.count -= take;
       if (this.held.count <= 0) this.held = null;
     } else {
-      this.inventory.setSlot(index, this.held);
+      set(this.held);
       this.held = stack;
     }
-    this.afterChange();
   }
 
-  private rightClickSlot(index: number): void {
-    const stack = this.inventory.getSlot(index);
+  private rightClickAt(get: () => ItemStack | null, set: (s: ItemStack | null) => void): void {
+    const stack = get();
     if (!this.held) {
       if (stack && stack.count > 0) {
         const half = Math.ceil(stack.count / 2);
         this.held = { id: stack.id, count: half };
         stack.count -= half;
-        if (stack.count <= 0) this.inventory.setSlot(index, null);
+        if (stack.count <= 0) set(null);
       }
     } else {
       if (!stack) {
-        this.inventory.setSlot(index, { id: this.held.id, count: 1 });
+        set({ id: this.held.id, count: 1 });
         this.held.count -= 1;
       } else if (stack.id === this.held.id) {
         const max = getItem(stack.id)?.maxStack ?? 64;
@@ -210,7 +238,71 @@ export class InventoryUI {
       }
       if (this.held.count <= 0) this.held = null;
     }
+  }
+
+  private leftClickSlot(index: number): void {
+    this.leftClickAt(
+      () => this.inventory.getSlot(index),
+      (s) => this.inventory.setSlot(index, s),
+    );
     this.afterChange();
+  }
+
+  private rightClickSlot(index: number): void {
+    this.rightClickAt(
+      () => this.inventory.getSlot(index),
+      (s) => this.inventory.setSlot(index, s),
+    );
+    this.afterChange();
+  }
+
+  private leftClickCraft(ci: number): void {
+    this.leftClickAt(
+      () => this.inventory.getCraft(ci),
+      (s) => this.inventory.setCraft(ci, s),
+    );
+    this.afterChange();
+  }
+
+  private rightClickCraft(ci: number): void {
+    this.rightClickAt(
+      () => this.inventory.getCraft(ci),
+      (s) => this.inventory.setCraft(ci, s),
+    );
+    this.afterChange();
+  }
+
+  /**
+   * Resolve the current craft grid against the recipe registry and, on a match,
+   * place the output into the held cursor (merging if compatible) while
+   * consuming one item from every filled craft cell. No-op if the result can't
+   * land in the held slot.
+   */
+  private craft(): void {
+    const m = this.currentMatch();
+    if (!m) return;
+    const max = getItem(m.result)?.maxStack ?? 64;
+    if (!this.held) {
+      this.held = { id: m.result, count: m.count };
+    } else if (this.held.id === m.result && this.held.count + m.count <= max) {
+      this.held.count += m.count;
+    } else {
+      return; // cursor holds something incompatible — don't consume inputs.
+    }
+    for (let i = 0; i < this.inventory.craftingGrid.length; i++) {
+      const s = this.inventory.getCraft(i);
+      if (s) {
+        s.count -= 1;
+        if (s.count <= 0) this.inventory.setCraft(i, null);
+      }
+    }
+    this.afterChange();
+  }
+
+  /** Build a flat (ItemId|null)[] view of the crafting grid for the matcher. */
+  private currentMatch(): MatchResult | null {
+    const grid = this.inventory.craftingGrid.map((s) => (s ? s.id : null));
+    return match(grid);
   }
 
   private giveFromPalette(id: ItemId, full: boolean): void {
@@ -221,6 +313,7 @@ export class InventoryUI {
 
   private afterChange(): void {
     this.renderSlots();
+    this.renderCraft();
     this.renderHeld();
     this.onRefresh?.();
   }
@@ -228,6 +321,29 @@ export class InventoryUI {
   private renderSlots(): void {
     for (let i = 0; i < this.slotEls.length; i++) {
       this.paintSlot(this.slotEls[i], this.inventory.getSlot(i));
+    }
+  }
+
+  private renderCraft(): void {
+    for (let i = 0; i < this.craftEls.length; i++) {
+      const node = this.craftEls[i];
+      if (node) this.paintSlot(node, this.inventory.getCraft(i));
+    }
+    this.paintOutput(this.currentMatch());
+  }
+
+  private paintOutput(m: MatchResult | null): void {
+    this.craftOutEl.classList.toggle("filled", !!m);
+    this.craftOutEl.innerHTML = "";
+    if (!m) return;
+    const def = getItem(m.result);
+    const sw = el("div", "swatch");
+    sw.style.background = def?.color ?? "#888";
+    this.craftOutEl.append(sw);
+    if (m.count > 1) {
+      const c = el("span", "count");
+      c.textContent = String(m.count);
+      this.craftOutEl.append(c);
     }
   }
 
@@ -296,6 +412,7 @@ export class InventoryUI {
     this.toggleBtn.textContent = mode === "creative" ? "Switch to Survival" : "Switch to Creative";
     this.paletteWrap.style.display = mode === "creative" ? "flex" : "none";
     this.renderSlots();
+    this.renderCraft();
     this.renderPalette();
     this.renderHeld();
   }
@@ -314,6 +431,16 @@ export class InventoryUI {
       const leftover = this.inventory.add(this.held.id, this.held.count);
       this.held = null;
       if (leftover > 0) this.onRefresh?.();
+    }
+    // Return anything left in the crafting grid to the backpack so items are
+    // never stranded. If the backpack is full, leave the remainder in its cell
+    // (the grid is persisted) rather than destroying it.
+    for (let i = 0; i < this.inventory.craftingGrid.length; i++) {
+      const s = this.inventory.getCraft(i);
+      if (!s) continue;
+      const leftover = this.inventory.add(s.id, s.count);
+      if (leftover > 0) this.inventory.setCraft(i, { id: s.id, count: leftover });
+      else this.inventory.setCraft(i, null);
     }
     this.root.setAttribute("hidden", "");
   }

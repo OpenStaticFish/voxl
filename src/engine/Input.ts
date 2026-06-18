@@ -12,8 +12,14 @@ export class Input {
   private readonly keys = new Set<string>();
   private mouseDX = 0;
   private mouseDY = 0;
+  private lastMouseMotionAt = -Infinity;
+  private lastPointerMotionAt = -Infinity;
   private breakQueued = false;
   private placeQueued = false;
+  private lastBreakQueueAt = -Infinity;
+  private lastPlaceQueueAt = -Infinity;
+  private lastBreakDownAt = -Infinity;
+  private lastPlaceDownAt = -Infinity;
   private _leftHeld = false;
   private _rightHeld = false;
   private lastSpaceTap = 0;
@@ -37,6 +43,13 @@ export class Input {
     window.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("keyup", this.handleKeyUp);
     window.addEventListener("mousemove", this.handleMouseMove);
+    // Pointer events are more reliable than legacy mouse events in some iframe
+    // / pointer-lock transitions. Survival mining depends on the held-button
+    // state, so mirror mouse down/up through pointer down/up too.
+    window.addEventListener("pointerdown", this.handlePointerDown, true);
+    window.addEventListener("pointermove", this.handlePointerMove);
+    window.addEventListener("pointerup", this.handlePointerUp);
+    window.addEventListener("pointercancel", this.handlePointerCancel);
     // mousedown is bound to window (capture phase) — NOT the canvas — so clicks
     // are caught even if an overlay element happens to sit above the canvas.
     window.addEventListener("mousedown", this.handleMouseDown, true);
@@ -61,6 +74,10 @@ export class Input {
     window.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("keyup", this.handleKeyUp);
     window.removeEventListener("mousemove", this.handleMouseMove);
+    window.removeEventListener("pointerdown", this.handlePointerDown, true);
+    window.removeEventListener("pointermove", this.handlePointerMove);
+    window.removeEventListener("pointerup", this.handlePointerUp);
+    window.removeEventListener("pointercancel", this.handlePointerCancel);
     window.removeEventListener("mousedown", this.handleMouseDown, true);
     window.removeEventListener("mouseup", this.handleMouseUp);
     window.removeEventListener("click", this.handleClick, true);
@@ -77,7 +94,7 @@ export class Input {
     if (t && t.closest && t.closest(".screen:not([hidden])")) return;
     e.preventDefault();
     dbg("contextmenu (robust right-click) -> placeQueued");
-    this.placeQueued = true;
+    if (performance.now() - this.lastPlaceDownAt > 700) this.queuePlace();
   };
 
   private handleClick = (e: MouseEvent): void => {
@@ -86,7 +103,7 @@ export class Input {
     const t = e.target as Element | null;
     if (t && t.closest && t.closest(".screen:not([hidden])")) return;
     dbg("click (robust left-click) -> breakQueued");
-    this.breakQueued = true;
+    if (performance.now() - this.lastBreakDownAt > 700) this.queueBreak();
   };
 
   private handleAuxClick = (e: MouseEvent): void => {
@@ -97,9 +114,21 @@ export class Input {
     if (t && t.closest && t.closest(".screen:not([hidden])")) return;
     if (e.button === 2) {
       dbg("auxclick (robust right-click) -> placeQueued");
-      this.placeQueued = true;
+      if (performance.now() - this.lastPlaceDownAt > 700) this.queuePlace();
     }
   };
+
+  private queueBreak(): void {
+    const now = performance.now();
+    if (now - this.lastBreakQueueAt > 180) this.breakQueued = true;
+    this.lastBreakQueueAt = now;
+  }
+
+  private queuePlace(): void {
+    const now = performance.now();
+    if (now - this.lastPlaceQueueAt > 180) this.placeQueued = true;
+    this.lastPlaceQueueAt = now;
+  }
 
   private handleKeyDown = (e: KeyboardEvent): void => {
     // Don't capture game keys while the user is typing in a form field.
@@ -133,9 +162,60 @@ export class Input {
   };
 
   private handleMouseMove = (e: MouseEvent): void => {
+    // Some browsers emit a mouseup during pointer-lock/focus transitions. Keep
+    // the held-button state recoverable from the browser's current bitfield,
+    // but never clear it here: pointer-lock mousemove events may report
+    // buttons=0 even while the physical button is still held.
+    if ((e.buttons & 1) !== 0) this._leftHeld = true;
+    if ((e.buttons & 2) !== 0) this._rightHeld = true;
     if (!this._locked) return;
+    const now = performance.now();
+    if (now - this.lastPointerMotionAt < 8) return;
+    this.lastMouseMotionAt = now;
     this.mouseDX += e.movementX;
     this.mouseDY += e.movementY;
+  };
+
+  private handlePointerDown = (e: PointerEvent): void => {
+    if (e.pointerType !== "mouse" && e.pointerType !== "pen") return;
+    const t = e.target as Element | null;
+    if (t && t.closest && t.closest(".screen:not([hidden])")) return;
+    e.preventDefault();
+    if (e.button === 0) {
+      this.lastBreakDownAt = performance.now();
+      this.queueBreak();
+      this._leftHeld = true;
+    } else if (e.button === 2) {
+      this.lastPlaceDownAt = performance.now();
+      this.queuePlace();
+      this._rightHeld = true;
+    }
+    if (!this._locked && e.button === 0) this.requestLock();
+  };
+
+  private handlePointerMove = (e: PointerEvent): void => {
+    if (e.pointerType !== "mouse" && e.pointerType !== "pen") return;
+    if ((e.buttons & 1) !== 0) this._leftHeld = true;
+    if ((e.buttons & 2) !== 0) this._rightHeld = true;
+    if (!this._locked) return;
+    // Some iframe/pointer-lock paths report movement on pointermove but not on
+    // mousemove while a button is held.
+    const now = performance.now();
+    if (now - this.lastMouseMotionAt < 8) return;
+    this.lastPointerMotionAt = now;
+    this.mouseDX += e.movementX;
+    this.mouseDY += e.movementY;
+  };
+
+  private handlePointerUp = (e: PointerEvent): void => {
+    if (e.pointerType !== "mouse" && e.pointerType !== "pen") return;
+    if (e.button === 0) this._leftHeld = false;
+    else if (e.button === 2) this._rightHeld = false;
+  };
+
+  private handlePointerCancel = (): void => {
+    this._leftHeld = false;
+    this._rightHeld = false;
   };
 
   private handleMouseDown = (e: MouseEvent): void => {
@@ -154,13 +234,16 @@ export class Input {
       return;
     }
     dbg(`mousedown button=${e.button} locked=${this._locked} target=${describe(t)} pointerLockElement=${document.pointerLockElement ? "yes" : "no"}`);
+    e.preventDefault();
     // Register the interaction FIRST, unconditionally, so clicks always mine/
     // place whether or not pointer lock is engaged.
     if (e.button === 0) {
-      this.breakQueued = true;
+      this.lastBreakDownAt = performance.now();
+      this.queueBreak();
       this._leftHeld = true;
     } else if (e.button === 2) {
-      this.placeQueued = true;
+      this.lastPlaceDownAt = performance.now();
+      this.queuePlace();
       this._rightHeld = true;
     }
     dbg(`  queued break=${this.breakQueued} place=${this.placeQueued} leftHeld=${this._leftHeld}`);
