@@ -452,10 +452,9 @@ export class LiquidSimulator {
 
   /**
    * True if the liquid cell at (x,y,z) may spread SIDEWARDS — i.e. it is a
-   * source, or a flowing cell resting on SOLID terrain. A flowing cell with
-   * water/air below is part of a suspended/falling column and must NOT spread
-   * sideways (otherwise a waterfall grows into a diverging 3D plume). Only the
-   * cell that actually lands on the floor spreads, which keeps flow bounded.
+   * source, or a flowing cell resting on SOLID terrain. This mirrors Luanti's
+   * `LIQUID_FLOW_DOWN_MASK` behavior: source nodes still feed same-level
+   * neighbours, but same-level falling flowing nodes cannot feed sideways.
    */
   private isSupported(access: LiquidAccess, x: number, y: number, z: number): boolean {
     const id = access.getBlock(x, y, z);

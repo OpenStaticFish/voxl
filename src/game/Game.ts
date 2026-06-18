@@ -11,6 +11,7 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import {
+  CHUNK_SIZE,
   PLAYER_HALF_WIDTH,
   PLAYER_HEIGHT,
   SEA_LEVEL,
@@ -925,13 +926,13 @@ export class Game {
       this.scene.fogEnd = 1e6;
       return;
     }
-    const far = this.settings.viewDistance * 16 * 2.0;
+    const far = (this.settings.viewDistance + 1.25) * CHUNK_SIZE;
     // Higher presets get a later fog start → clearer mid-distance terrain and
     // less of the washed-out haze. Low keeps an earlier start to hide the
     // pop-in that comes with its shorter render distance.
     const startFrac =
-      this.settings.graphics.preset === "high" ? 0.6 :
-      this.settings.graphics.preset === "low" ? 0.42 : 0.5;
+      this.settings.graphics.preset === "high" ? 0.78 :
+      this.settings.graphics.preset === "low" ? 0.58 : 0.7;
     this.scene.fogEnd = far;
     this.scene.fogStart = far * startFrac;
     // Tell the underwater renderer the new above-water baseline so its blend

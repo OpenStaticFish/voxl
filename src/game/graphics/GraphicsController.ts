@@ -41,7 +41,7 @@ export function shadowConfigForQuality(quality: ShadowQuality): {
 }
 
 /** Maximum supported render distance (chunk radius), capped for browser safety. */
-export const MAX_RENDER_DISTANCE = 12;
+export const MAX_RENDER_DISTANCE = 20;
 /** Minimum render distance — below this the world feels empty. */
 export const MIN_RENDER_DISTANCE = 2;
 
@@ -133,9 +133,9 @@ export class GraphicsController {
       }
       this.pipeline.fxaaEnabled = true;
     } else if (this.pipeline) {
-      // AA off → tear down the pipeline so the scene renders straight to the
-      // default framebuffer (no fullscreen pass). Engine-level MSAA (set at
-      // context creation) remains as the baseline edge AA.
+      // AA off: tear down the pipeline so the scene renders straight to the
+      // default framebuffer. Engine-level antialiasing is also disabled at
+      // context creation, so low/custom presets render with no AA.
       this.pipeline.dispose();
       this.pipeline = null;
     }
@@ -179,9 +179,9 @@ export class GraphicsController {
 export function presetRenderDistance(preset: GraphicsSettings["preset"]): number {
   switch (preset) {
     case "low": return 4;
-    case "high": return 8;
+    case "high": return 16;
     case "medium":
-    default: return 6;
+    default: return 10;
   }
 }
 

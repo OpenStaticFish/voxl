@@ -194,9 +194,11 @@ export class World {
     const cached = this.spiralCache.get(radius);
     if (cached) return cached;
     const list: Array<{ dx: number; dz: number; d: number }> = [];
+    const radiusSq = radius * radius;
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dz = -radius; dz <= radius; dz++) {
-        list.push({ dx, dz, d: dx * dx + dz * dz });
+        const d = dx * dx + dz * dz;
+        if (d <= radiusSq) list.push({ dx, dz, d });
       }
     }
     list.sort((a, b) => a.d - b.d);
@@ -514,7 +516,7 @@ export class World {
 
   /** Set the foliage (cutout) render-distance tier. Draw-time only. */
   setFoliageDensity(density: FoliageDensity): void {
-    this.foliageCutoutDistance = density === "low" ? 48 : density === "medium" ? 96 : Infinity;
+    this.foliageCutoutDistance = density === "low" ? 48 : density === "medium" ? 96 : 160;
   }
 
   /**
