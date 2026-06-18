@@ -124,7 +124,7 @@ export class Inventory {
   }
 
   isEmpty(): boolean {
-    return this.slots.every((s) => !s);
+    return this.slots.every((s) => !s) && this.craftingGrid.every((s) => !s);
   }
 
   serialize(): SerializedSlot[] {

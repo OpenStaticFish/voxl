@@ -325,8 +325,7 @@ export class InventoryUI {
   }
 
   private renderCraft(): void {
-    for (let i = 0; i < this.craftEls.length; i++) {
-      const node = this.craftEls[i];
+    for (const [i, node] of this.craftEls.entries()) {
       if (node) this.paintSlot(node, this.inventory.getCraft(i));
     }
     this.paintOutput(this.currentMatch());

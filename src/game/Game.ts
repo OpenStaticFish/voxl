@@ -69,6 +69,9 @@ interface DroppedItem {
   count: number;
   mesh: Mesh;
   baseY: number;
+  supportX: number;
+  supportY: number;
+  supportZ: number;
   vy: number;
   grounded: boolean;
   age: number;
@@ -532,8 +535,21 @@ export class Game {
       // Mode inventories are intentionally isolated. Creative palette pulls
       // must never leak into survival, and entering creative should always show
       // the clean starter hotbar.
-      this.seedInventoryForMode(mode);
-      this.stats.reset();
+      if (mode === "creative") {
+        this.seedInventoryForMode("creative");
+        this.stats.reset();
+      } else {
+        const save = loadSave(this.settings.seed);
+        if (save) {
+          this.inventory.clear();
+          this.inventory.load(save.inventory);
+          this.inventory.loadCrafting(save.crafting);
+          this.stats.load(save.stats);
+        } else {
+          this.seedInventoryForMode("survival");
+          this.stats.reset();
+        }
+      }
       this.invUI.refresh();
       this.refreshHud();
     }
@@ -835,7 +851,7 @@ export class Game {
     mesh.material = this.dropMaterial(id);
     mesh.position.set(x, y, z);
     mesh.rotation.set(0.25, 0.4, 0.15);
-    this.drops.push({ id, count, mesh, baseY: y, vy: 0, grounded: false, age: 0 });
+    this.drops.push({ id, count, mesh, baseY: y, supportX: 0, supportY: -1, supportZ: 0, vy: 0, grounded: false, age: 0 });
   }
 
   private updateDrops(dt: number): void {
@@ -853,6 +869,9 @@ export class Game {
         const bz = Math.floor(d.mesh.position.z);
         if (belowY >= 0 && getBlock(this.world!.getBlock(bx, belowY, bz)).solid && footY <= belowY + 1) {
           d.baseY = belowY + 1 + DROP_HALF_SIZE;
+          d.supportX = bx;
+          d.supportY = belowY;
+          d.supportZ = bz;
           d.mesh.position.y = d.baseY;
           d.vy = 0;
           d.grounded = true;
@@ -862,6 +881,11 @@ export class Game {
           continue;
         }
       } else {
+        if (!getBlock(this.world!.getBlock(d.supportX, d.supportY, d.supportZ)).solid) {
+          d.grounded = false;
+          d.vy = 0;
+          continue;
+        }
         d.mesh.position.y = d.baseY + Math.sin(d.age * 4) * DROP_FLOAT_AMPLITUDE;
       }
       d.mesh.rotation.y += dt * 1.8;
